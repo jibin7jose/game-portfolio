@@ -8,6 +8,7 @@ export const useControls = () => {
         right: false,
         brake: false,
         reset: false,
+        jump: false,
     });
 
     useEffect(() => {
@@ -34,6 +35,9 @@ export const useControls = () => {
                     break;
                 case 'r':
                     setKeys((keys) => ({ ...keys, reset: true }));
+                    break;
+                case 'k':
+                    setKeys((keys) => ({ ...keys, jump: true }));
                     break;
                 default:
                     break;
@@ -63,6 +67,9 @@ export const useControls = () => {
                     break;
                 case 'r':
                     setKeys((keys) => ({ ...keys, reset: false }));
+                    break;
+                case 'k':
+                    setKeys((keys) => ({ ...keys, jump: false }));
                     break;
                 default:
                     break;

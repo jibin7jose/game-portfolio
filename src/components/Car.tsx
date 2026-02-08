@@ -16,8 +16,9 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
     const [chassis, chassisApi] = useBox(
         () => ({
             args: chassisArgs,
-            mass: 150,
+            mass: 200,
             position: position as [number, number, number],
+            allowSleep: false,
         }),
         useRef<THREE.Group>(null)
     );
@@ -30,13 +31,13 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
             directionLocal: [0, -1, 0],
             suspensionStiffness: 30,
             suspensionRestLength: 0.3,
-            frictionSlip: 5,
+            frictionSlip: 10,
             dampingRelaxation: 2.3,
             dampingCompression: 4.4,
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
             axleLocal: [-1, 0, 0],
-            chassisConnectionPointLocal: [0.6, 0, 1],
+            chassisConnectionPointLocal: [0.7, 0, 1],
             isFrontWheel: true,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
@@ -46,13 +47,13 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
             directionLocal: [0, -1, 0],
             suspensionStiffness: 30,
             suspensionRestLength: 0.3,
-            frictionSlip: 5,
+            frictionSlip: 10,
             dampingRelaxation: 2.3,
             dampingCompression: 4.4,
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
             axleLocal: [-1, 0, 0],
-            chassisConnectionPointLocal: [-0.6, 0, 1],
+            chassisConnectionPointLocal: [-0.7, 0, 1],
             isFrontWheel: true,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
@@ -62,13 +63,13 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
             directionLocal: [0, -1, 0],
             suspensionStiffness: 30,
             suspensionRestLength: 0.3,
-            frictionSlip: 5,
+            frictionSlip: 10,
             dampingRelaxation: 2.3,
             dampingCompression: 4.4,
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
             axleLocal: [-1, 0, 0],
-            chassisConnectionPointLocal: [0.6, 0, -1],
+            chassisConnectionPointLocal: [0.7, 0, -1],
             isFrontWheel: false,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
@@ -78,13 +79,13 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
             directionLocal: [0, -1, 0],
             suspensionStiffness: 30,
             suspensionRestLength: 0.3,
-            frictionSlip: 5,
+            frictionSlip: 10,
             dampingRelaxation: 2.3,
             dampingCompression: 4.4,
             maxSuspensionForce: 100000,
             rollInfluence: 0.01,
             axleLocal: [-1, 0, 0],
-            chassisConnectionPointLocal: [-0.6, 0, -1],
+            chassisConnectionPointLocal: [-0.7, 0, -1],
             isFrontWheel: false,
             customSlidingRotationalSpeed: -30,
             useCustomSlidingRotationalSpeed: true,
@@ -103,8 +104,8 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
     useFrame((state) => {
         const { forward, backward, left, right, brake, reset } = controls;
 
-        const force = 1000;
-        const steer = 0.6;
+        const force = 5000;
+        const steer = 0.5;
 
         if (reset) {
             chassisApi.position.set(position[0], position[1], position[2]);
@@ -113,23 +114,26 @@ const Car = ({ position = [0, 2, 0] }: { position?: [number, number, number] }) 
             chassisApi.rotation.set(0, 0, 0);
         }
 
-        vehicleApi.applyEngineForce(forward ? -force : backward ? force : 0, 2);
-        vehicleApi.applyEngineForce(forward ? -force : backward ? force : 0, 3);
+        // Apply force to all wheels for maximum traction
+        for (let i = 0; i < 4; i++) {
+            vehicleApi.applyEngineForce(forward ? -force : backward ? force : 0, i);
+        }
 
         vehicleApi.setSteeringValue(left ? steer : right ? -steer : 0, 0);
         vehicleApi.setSteeringValue(left ? steer : right ? -steer : 0, 1);
 
-        vehicleApi.setBrake(brake ? 10 : 0, 2);
-        vehicleApi.setBrake(brake ? 10 : 0, 3);
+        for (let i = 0; i < 4; i++) {
+            vehicleApi.setBrake(brake ? 100 : 0, i);
+        }
 
         // Camera follow
         if (chassis.current) {
             const pos = new THREE.Vector3();
             chassis.current.getWorldPosition(pos);
 
-            const cameraOffset = new THREE.Vector3(15, 15, 15);
+            const cameraOffset = new THREE.Vector3(12, 10, 12);
             const targetPos = pos.clone().add(cameraOffset);
-            state.camera.position.lerp(targetPos, 0.05);
+            state.camera.position.lerp(targetPos, 0.1);
             state.camera.lookAt(pos);
         }
     });

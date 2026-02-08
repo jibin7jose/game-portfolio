@@ -3,11 +3,13 @@ import { Canvas } from '@react-three/fiber';
 import { Physics, Debug } from '@react-three/cannon';
 import { Sky, Stars, Environment, Stats } from '@react-three/drei';
 import { World } from './components/World.tsx';
+import { useControls } from './hooks/useControls';
 import './index.css';
 
 function App() {
   const [loading, setLoading] = useState(true);
   const [debug, setDebug] = useState(false);
+  const controls = useControls();
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 2000);
@@ -48,7 +50,7 @@ function App() {
             castShadow
             shadow-mapSize={[2048, 2048]}
           />
-          <Physics gravity={[0, -9.81, 0]} tolerance={0.001}>
+          <Physics gravity={[0, -9.81, 0]}>
             {debug ? (
               <Debug color="white" scale={1.1}>
                 <World />
@@ -64,16 +66,16 @@ function App() {
 
       <div className="instructions">
         <div className="instruction-item">
-          <span className="key">WASD</span> or <span className="key">ARROWS</span> Drive
+          <span className={`key ${(controls.forward || controls.backward) ? 'active' : ''}`}>WASD</span> or <span className={`key ${(controls.forward || controls.backward) ? 'active' : ''}`}>ARROWS</span> Drive
         </div>
         <div className="instruction-item">
-          <span className="key">SPACE</span> Brake
+          <span className={`key ${controls.brake ? 'active' : ''}`}>SPACE</span> Brake
         </div>
         <div className="instruction-item">
-          <span className="key">R</span> Reset
+          <span className={`key ${controls.reset ? 'active' : ''}`}>R</span> Reset
         </div>
         <div className="instruction-item">
-          <span className="key">P</span> Debug Mode
+          <span className={`key ${debug ? 'active' : ''}`}>P</span> Debug Mode
         </div>
       </div>
     </div>

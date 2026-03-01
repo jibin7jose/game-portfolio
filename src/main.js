@@ -109,60 +109,85 @@ let resetPressedLastFrame = false;
 // ═══════════════════════════════════════════════════════════════
 //  WEB AUDIO — ENGINE SOUND (no files needed)
 // ═══════════════════════════════════════════════════════════════
-let audioCtx = null, engineOsc = null, engineGain = null;
-let driftOsc = null, driftGain = null;
+let audioCtx = null, engineGain = null;
+let engineOscA = null, engineOscB = null, engineOscC = null;
+let engineFilter = null, rumbleNode = null;
+let driftGain = null;
 
 function initAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // --- Engine: layered oscillators ---
-    const oscA = audioCtx.createOscillator();
-    const oscB = audioCtx.createOscillator();
-    oscA.type = 'sawtooth'; oscA.frequency.value = 60;
-    oscB.type = 'square'; oscB.frequency.value = 63;
+    // --- Engine: Harmonic Stack ---
+    engineOscA = audioCtx.createOscillator();
+    engineOscB = audioCtx.createOscillator();
+    engineOscC = audioCtx.createOscillator();
+
+    engineOscA.type = 'sawtooth'; engineOscA.frequency.value = 55;
+    engineOscB.type = 'square'; engineOscB.frequency.value = 57;
+    engineOscC.type = 'sawtooth'; engineOscC.frequency.value = 27; // Sub-rumble
+
+    engineFilter = audioCtx.createBiquadFilter();
+    engineFilter.type = 'lowpass';
+    engineFilter.frequency.value = 400;
+    engineFilter.Q.value = 4.5; // Resonant frequency for "engine" character
 
     engineGain = audioCtx.createGain();
-    engineGain.gain.value = 0.06;
+    engineGain.gain.value = 0.05;
 
-    const distortion = audioCtx.createWaveShaper();
+    // Distortion for growl
+    const dist = audioCtx.createWaveShaper();
     const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) curve[i] = (i / 128 - 1) > 0 ? 1 : -1;
-    distortion.curve = curve;
+    for (let i = 0; i < 256; i++) {
+        const x = (i / 128) - 1;
+        curve[i] = (Math.PI + 10) * x / (Math.PI + 10 * Math.abs(x));
+    }
+    dist.curve = curve;
 
-    oscA.connect(distortion);
-    oscB.connect(engineGain);
-    distortion.connect(engineGain);
+    engineOscA.connect(dist); dist.connect(engineFilter);
+    engineOscB.connect(engineFilter);
+    engineOscC.connect(engineFilter);
+    engineFilter.connect(engineGain);
     engineGain.connect(audioCtx.destination);
-    oscA.start(); oscB.start();
-    engineOsc = oscA;
 
-    // --- Tyre screech: band-pass noise ---
-    const bufLen = audioCtx.sampleRate * 0.5;
+    engineOscA.start(); engineOscB.start(); engineOscC.start();
+
+    // --- Tire screech: Sharp Band-pass ---
+    const bufLen = audioCtx.sampleRate * 0.4;
     const noiseBuf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
     const nd = noiseBuf.getChannelData(0);
     for (let i = 0; i < bufLen; i++) nd[i] = Math.random() * 2 - 1;
     const noiseNode = audioCtx.createBufferSource();
     noiseNode.buffer = noiseBuf; noiseNode.loop = true;
+
     const bpf = audioCtx.createBiquadFilter();
-    bpf.type = 'bandpass'; bpf.frequency.value = 1200; bpf.Q.value = 2;
+    bpf.type = 'bandpass'; bpf.frequency.value = 1600; bpf.Q.value = 3.5;
+
     driftGain = audioCtx.createGain(); driftGain.gain.value = 0;
     noiseNode.connect(bpf); bpf.connect(driftGain); driftGain.connect(audioCtx.destination);
     noiseNode.start();
-    driftOsc = noiseNode;
 }
 
 function updateAudio(speed, boosting, drifting) {
-    if (!audioCtx || !engineOsc) return;
+    if (!audioCtx || !engineOscA) return;
     const kmh = Math.abs(speed) * 3.6;
-    // Engine pitch: idle ~60Hz, max ~240Hz
-    const targetFreq = 60 + (kmh / 160) * 240 + (boosting ? 40 : 0);
-    engineOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
-    // Engine volume: idle soft, revving medium
-    const targetGain = 0.04 + (kmh / 160) * 0.14 + (boosting ? 0.04 : 0);
-    engineGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.05);
+
+    // Engine pitch: richer harmonics
+    const base = 48 + (kmh / 160) * 110 + (boosting ? 35 : 0);
+    engineOscA.frequency.setTargetAtTime(base, audioCtx.currentTime, 0.04);
+    engineOscB.frequency.setTargetAtTime(base * 2.01, audioCtx.currentTime, 0.04);
+    engineOscC.frequency.setTargetAtTime(base * 0.5, audioCtx.currentTime, 0.04);
+
+    // Filter sweep: creates "revving" effect
+    const filterFreq = 180 + (kmh / 160) * 1200 + (boosting ? 400 : 0);
+    engineFilter.frequency.setTargetAtTime(filterFreq, audioCtx.currentTime, 0.06);
+
+    // Volume scaling
+    const vol = 0.05 + (kmh / 160) * 0.15 + (boosting ? 0.05 : 0);
+    engineGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.04);
+
     // Tyre screech
-    const screeVol = drifting ? 0.3 : 0;
+    const screeVol = drifting ? 0.35 * Math.min(kmh / 40, 1) : 0;
     driftGain.gain.setTargetAtTime(screeVol, audioCtx.currentTime, 0.08);
 }
 
@@ -292,8 +317,8 @@ function buildEnvironment() {
         scene.add(pl);
     });
 
-    // ── BOUNDED GROUND — expanded to 500 for full city coverage
-    const geoSize = 500;
+    // ── BOUNDED GROUND — tightened to 220 to match city core area
+    const geoSize = 220;
     const groundMat = new THREE.MeshStandardMaterial({
         color: 0x0d1117,
         roughness: 0.95,
@@ -913,21 +938,45 @@ function checkCollisions() {
 
 function playCollisionSound(intensity = 0.5) {
     if (!audioCtx || soundMuted) return;
-    // Short burst of filtered noise = metal thud
-    const len = Math.floor(audioCtx.sampleRate * 0.18);
-    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
-    const d = buf.getChannelData(0);
-    const decay = audioCtx.sampleRate * 0.06;
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / decay);
 
-    const src = audioCtx.createBufferSource();
-    src.buffer = buf;
-    const lpf = audioCtx.createBiquadFilter();
-    lpf.type = 'lowpass'; lpf.frequency.value = 350 + intensity * 300;
-    const g = audioCtx.createGain();
-    g.gain.value = 0.55 * intensity;
-    src.connect(lpf); lpf.connect(g); g.connect(audioCtx.destination);
-    src.start(); src.stop(audioCtx.currentTime + 0.2);
+    const now = audioCtx.currentTime;
+
+    // 1. LOW THUD (Sine impact)
+    const thud = audioCtx.createOscillator();
+    const thudGain = audioCtx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(140 * intensity, now);
+    thud.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+
+    thudGain.gain.setValueAtTime(0.7 * intensity, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+    thud.connect(thudGain);
+    thudGain.connect(audioCtx.destination);
+    thud.start(); thud.stop(now + 0.2);
+
+    // 2. METAL NOISE BURST
+    const noiseLen = Math.floor(audioCtx.sampleRate * 0.25);
+    const noiseBuf = audioCtx.createBuffer(1, noiseLen, audioCtx.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < noiseLen; i++) {
+        nd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (audioCtx.sampleRate * 0.04));
+    }
+
+    const noiseSrc = audioCtx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+
+    const noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 450 + 800 * intensity;
+
+    const noiseGain = audioCtx.createGain();
+    noiseGain.gain.value = 0.45 * intensity;
+
+    noiseSrc.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(audioCtx.destination);
+    noiseSrc.start();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1020,8 +1069,8 @@ function animate() {
         carRoot.position.x += carVel.x * sDt;
         carRoot.position.z += carVel.z * sDt;
         if (checkCollisions()) hitAny = true;
-        carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -137, 137);
-        carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -137, 137);
+        carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -108, 108);
+        carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -108, 108);
     }
 
     // Emergency Stuck Warp: if stuck in red zone for > 1.5s

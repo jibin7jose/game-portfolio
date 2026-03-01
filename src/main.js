@@ -118,7 +118,8 @@ let driftGain = null;
 // New Gear & RPM Logic
 let currentGear = 1;
 let lastGear = 1;
-let engineRPM = 0; // 0.2 (idle) to 1.0 (redline)
+let engineRPM = 0.2; // 0.2 (idle) to 1.0 (redline)
+let currentAudioRPM = 0.2; // smoothed RPM for pitch/logic
 
 function initAudio() {
     if (audioCtx) return;
@@ -180,54 +181,60 @@ function updateAudio(speed, boosting, drifting) {
     if (!audioCtx || !engineGain) return;
     const kmh = Math.abs(speed) * 3.6;
 
-    // ── Gear Shifting Logic ────────────────────────────
-    let gear = 1;
-    if (kmh < 20) gear = 1;
-    else if (kmh < 42) gear = 2;
-    else if (kmh < 75) gear = 3;
-    else gear = 4;
+    // ── Gear Shifting Logic (Slower/Smoother) ──────────
+    let targetGear = 1;
+    if (kmh < 22) targetGear = 1;
+    else if (kmh < 48) targetGear = 2;
+    else if (kmh < 85) targetGear = 3;
+    else targetGear = 4;
 
-    if (kmh < 0.5) gear = 1; // reset gear at stop
+    if (kmh < 0.5) targetGear = 1;
 
-    // Gear shift sound effect
-    if (gear !== lastGear) {
-        playGearShiftSound(gear > lastGear ? 'up' : 'down');
-        lastGear = gear;
+    // Gear shift sound trigger
+    if (targetGear !== lastGear) {
+        playGearShiftSound(targetGear > lastGear ? 'up' : 'down');
+        lastGear = targetGear;
     }
-    currentGear = gear;
+    currentGear = targetGear;
 
-    // RPM Calculation: RPM climbs within the gear range
-    let rpmBase = 0;
-    let rpmMax = 1;
-    if (gear === 1) { rpmBase = 0; rpmMax = 20; }
-    else if (gear === 2) { rpmBase = 20; rpmMax = 42; }
-    else if (gear === 3) { rpmBase = 42; rpmMax = 75; }
-    else { rpmBase = 75; rpmMax = 220; }
+    // RPM Calculation: climbs within the gear range
+    let rpmBase = 0, rpmMax = 1;
+    if (targetGear === 1) { rpmBase = 0; rpmMax = 22; }
+    else if (targetGear === 2) { rpmBase = 22; rpmMax = 48; }
+    else if (targetGear === 3) { rpmBase = 48; rpmMax = 85; }
+    else { rpmBase = 85; rpmMax = 220; }
 
-    // engineRPM should go from roughly 0.4 (start of gear) to 1.0 (end of gear)
-    engineRPM = 0.4 + (Math.min(kmh, rpmMax) - rpmBase) / (rpmMax - rpmBase) * 0.6;
-    if (kmh < 1) engineRPM = 0.2; // idle
+    let targetRPM = 0.4 + (Math.min(kmh, rpmMax) - rpmBase) / (rpmMax - rpmBase) * 0.6;
+    if (kmh < 1) targetRPM = 0.15; // Clean Idle
+
+    // --- SMOOTHING: slowly blend currentAudioRPM toward targetRPM ---
+    // This makes gear shifts feel more natural/flowing (Slowly gear change)
+    const shiftSmoothing = (targetGear !== lastGear) ? 0.02 : 0.08;
+    currentAudioRPM += (targetRPM - currentAudioRPM) * shiftSmoothing;
 
     // ── MP3 Engine Simulation ──────────────────────────
     if (engineSource) {
-        const rate = 0.5 + engineRPM * 2.2 + (boosting ? 0.3 : 0);
-        engineSource.playbackRate.setTargetAtTime(rate, audioCtx.currentTime, 0.08);
+        // Significantly lower playbackRate at idle so it doesn't sound "moving"
+        // Only blooms into a racing sound when kmh > 1
+        const rate = (kmh < 1) ? 0.45 : (0.5 + currentAudioRPM * 2.1 + (boosting ? 0.4 : 0));
+        engineSource.playbackRate.setTargetAtTime(rate, audioCtx.currentTime, 0.1);
     }
 
     // ── Procedural Layer Update ────────────────────────
     if (engineOscA) {
-        const freq = 40 + engineRPM * 160 + (boosting ? 40 : 0);
-        engineOscA.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.04);
-        engineOscB.frequency.setTargetAtTime(freq * 1.5, audioCtx.currentTime, 0.04);
-        engineOscC.frequency.setTargetAtTime(freq * 0.5, audioCtx.currentTime, 0.04);
+        const freq = (kmh < 1) ? 30 : (40 + currentAudioRPM * 160 + (boosting ? 40 : 0));
+        engineOscA.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.08);
+        engineOscB.frequency.setTargetAtTime(freq * 1.5, audioCtx.currentTime, 0.08);
+        engineOscC.frequency.setTargetAtTime(freq * 0.5, audioCtx.currentTime, 0.08);
 
-        const f = 150 + engineRPM * 1800 + (boosting ? 500 : 0);
-        engineFilter.frequency.setTargetAtTime(f, audioCtx.currentTime, 0.07);
+        const f = 120 + currentAudioRPM * 1800 + (boosting ? 500 : 0);
+        engineFilter.frequency.setTargetAtTime(f, audioCtx.currentTime, 0.12);
     }
 
-    // Volume scaling
-    const vol = (engineSource ? 0.38 : 0.06) + (kmh / 160) * 0.12 + (boosting ? 0.08 : 0);
-    engineGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.06);
+    // Volume scaling: distinctly quiet at stop, loud at speed
+    const baseVol = (engineSource ? 0.38 : 0.06);
+    const movingVol = (kmh < 1) ? 0.22 : (baseVol + (kmh / 160) * 0.15 + (boosting ? 0.1 : 0));
+    engineGain.gain.setTargetAtTime(movingVol, audioCtx.currentTime, 0.15);
 
     // Tyre screech
     const screeVol = drifting ? 0.35 * Math.min(kmh / 40, 1) : 0;

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>M3A1 Scout Car — Three.js</title>
+  <meta name="description" content="M3A1 Scout Car interactive 3D driving experience built with Three.js" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0a0e1a;
+      overflow: hidden;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      color: white;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    /* HUD */
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Speedometer */
+    #speedometer {
+      position: absolute;
+      bottom: 2.5rem;
+      right: 2.5rem;
+      width: 160px;
+      height: 160px;
+    }
+
+    #speed-canvas {
+      border-radius: 50%;
+    }
+
+    #speed-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    #speed-value {
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: #00ffcc;
+      text-shadow: 0 0 20px #00ffcc80;
+      line-height: 1;
+    }
+
+    #speed-unit {
+      font-size: 0.55rem;
+      color: rgba(0, 255, 204, 0.5);
+      letter-spacing: 0.25em;
+    }
+
+    /* Gear indicator */
+    #gear-box {
+      position: absolute;
+      bottom: 2.5rem;
+      right: calc(2.5rem + 175px);
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(0, 255, 204, 0.2);
+      backdrop-filter: blur(12px);
+      border-radius: 8px;
+      padding: 0.8rem 1.2rem;
+      text-align: center;
+    }
+
+    #gear-label {
+      font-size: 0.45rem;
+      color: rgba(255, 255, 255, 0.3);
+      letter-spacing: 0.3em;
+    }
+
+    #gear-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #00ffcc;
+      margin-top: 4px;
+    }
+
+    /* Top bar */
+    #topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 1.2rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
+    }
+
+    #brand {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.3em;
+      color: #00ffcc;
+      text-shadow: 0 0 15px #00ffcc60;
+    }
+
+    #model-name {
+      font-size: 0.55rem;
+      color: rgba(255, 255, 255, 0.3);
+      letter-spacing: 0.25em;
+    }
+
+    #coords {
+      font-size: 0.55rem;
+      color: rgba(255, 255, 255, 0.25);
+      letter-spacing: 0.15em;
+      text-align: right;
+    }
+
+    /* Controls panel */
+    #controls-panel {
+      position: absolute;
+      bottom: 2.5rem;
+      left: 2rem;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(12px);
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .ctrl-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .key {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      color: #00ffcc;
+      min-width: 26px;
+      text-align: center;
+    }
+
+    .ctrl-desc {
+      font-size: 0.5rem;
+      color: rgba(255, 255, 255, 0.28);
+      letter-spacing: 0.12em;
+    }
+
+    .ctrl-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      margin: 2px 0;
+    }
+
+    /* Mini compass */
+    #compass {
+      position: absolute;
+      top: 5rem;
+      right: 2rem;
+      width: 70px;
+      height: 70px;
+    }
+
+    #compass-canvas {
+      border-radius: 50%;
+    }
+
+    /* Damage / boost bar */
+    #status-bars {
+      position: absolute;
+      top: 5rem;
+      left: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .bar-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .bar-label {
+      font-size: 0.45rem;
+      color: rgba(255, 255, 255, 0.3);
+      letter-spacing: 0.2em;
+    }
+
+    .bar-track {
+      width: 120px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
+    #boost-fill {
+      background: linear-gradient(90deg, #00ffcc, #00bbff);
+    }
+
+    #engine-fill {
+      background: linear-gradient(90deg, #f87171, #fbbf24);
+    }
+
+    /* Loading screen */
+    #loading {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: #050810;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+    }
+
+    #loading-title {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      color: #00ffcc;
+      text-shadow: 0 0 40px #00ffcc70;
+    }
+
+    #loading-sub {
+      font-size: 0.6rem;
+      color: rgba(255, 255, 255, 0.3);
+      letter-spacing: 0.35em;
+    }
+
+    #loading-bar-track {
+      width: 280px;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 1px;
+    }
+
+    #loading-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #00ffcc, #00bbff);
+      border-radius: 1px;
+      transition: width 0.3s;
+      box-shadow: 0 0 10px #00ffcc;
+    }
+
+    #loading-status {
+      font-size: 0.5rem;
+      color: rgba(255, 255, 255, 0.2);
+      letter-spacing: 0.2em;
+    }
+
+    /* Sound toggle — premium pill button */
+    #sound-btn {
+      position: fixed;
+      top: 1.2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      pointer-events: all;
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(0, 255, 204, 0.35);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 100px;
+      padding: 0.5rem 1.4rem 0.5rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      color: #00ffcc;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.18em;
+      font-weight: 700;
+      user-select: none;
+      box-shadow: 0 0 12px rgba(0, 255, 204, 0.12);
+    }
+
+    #sound-btn:hover {
+      border-color: rgba(0, 255, 204, 0.7);
+      background: rgba(0, 255, 204, 0.08);
+      box-shadow: 0 0 24px rgba(0, 255, 204, 0.3);
+    }
+
+    #sound-btn.muted {
+      color: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.06);
+      box-shadow: none;
+    }
+
+    /* Animated sound bars */
+    .sound-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 16px;
+    }
+
+    .sound-bar {
+      width: 3px;
+      background: #00ffcc;
+      border-radius: 2px;
+      animation: soundBar 0.7s ease-in-out infinite alternate;
+    }
+
+    .sound-bar:nth-child(1) {
+      height: 6px;
+      animation-delay: 0s;
+      animation-duration: 0.5s;
+    }
+
+    .sound-bar:nth-child(2) {
+      height: 14px;
+      animation-delay: 0.1s;
+      animation-duration: 0.7s;
+    }
+
+    .sound-bar:nth-child(3) {
+      height: 10px;
+      animation-delay: 0.2s;
+      animation-duration: 0.4s;
+    }
+
+    .sound-bar:nth-child(4) {
+      height: 16px;
+      animation-delay: 0.05s;
+      animation-duration: 0.6s;
+    }
+
+    .sound-bar:nth-child(5) {
+      height: 8px;
+      animation-delay: 0.15s;
+      animation-duration: 0.5s;
+    }
+
+    @keyframes soundBar {
+      from {
+        transform: scaleY(0.3);
+        opacity: 0.5;
+      }
+
+      to {
+        transform: scaleY(1.0);
+        opacity: 1.0;
+      }
+    }
+
+    #sound-btn.muted .sound-bar {
+      animation: none;
+      transform: scaleY(0.25);
+      opacity: 0.15;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    #sound-btn.muted .sound-label {
+      color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Drift indicator */
+    #drift-indicator {
+      position: fixed;
+      bottom: 12rem;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #ff4400;
+      font-size: 1.2rem;
+      font-weight: 900;
+      letter-spacing: 0.4em;
+      text-shadow: 0 0 20px #ff4400;
+      opacity: 0;
+      transition: opacity 0.1s;
+      pointer-events: none;
+      z-index: 15;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <!-- Loading -->
+    <div id="loading">
+      <div id="loading-title">⚙ SCOUT RECON</div>
+      <div id="loading-sub">M3A1 SCOUT CAR // TACTICAL DRIVE</div>
+      <div id="loading-bar-track">
+        <div id="loading-bar-fill"></div>
+      </div>
+      <div id="loading-status">INITIALIZING ENGINE...</div>
+    </div>
+
+    <!-- Nitro flash -->
+    <div id="nitro-flash"></div>
+
+    <!-- Nitro flash (fullscreen) -->
+    <div id="nitro-flash"
+      style="position:fixed;inset:0;pointer-events:none;z-index:20;background:radial-gradient(ellipse at center,rgba(0,255,204,0.10) 0%,transparent 60%);opacity:0;transition:opacity 0.1s;">
+    </div>
+
+    <!-- Sound toggle — premium animated button -->
+    <button id="sound-btn" title="Toggle Sound" onclick="toggleSound()">
+      <div class="sound-bars">
+        <div class="sound-bar"></div>
+        <div class="sound-bar"></div>
+        <div class="sound-bar"></div>
+        <div class="sound-bar"></div>
+        <div class="sound-bar"></div>
+      </div>
+      <span class="sound-label">SOUND ON</span>
+    </button>
+
+    <!-- Drift indicator -->
+    <div id="drift-indicator">🔥 DRIFT</div>
+
+    <!-- HUD (hidden until loaded) -->
+    <div id="hud" style="opacity:0; transition: opacity 1s;">
+
+      <!-- Top bar -->
+      <div id="topbar">
+        <div>
+          <div id="brand">⚙ SCOUT.EXE</div>
+          <div id="model-name">M3A1 SCOUT CAR // RECON</div>
+        </div>
+        <div id="coords">X: 0.0 | Z: 0.0 | Y: 0.0</div>
+      </div>
+
+      <!-- Status bars -->
+      <div id="status-bars">
+        <div class="bar-wrap">
+          <div class="bar-label">NITRO</div>
+          <div class="bar-track">
+            <div class="bar-fill" id="boost-fill" style="width:100%"></div>
+          </div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label">ENGINE TEMP</div>
+          <div class="bar-track">
+            <div class="bar-fill" id="engine-fill" style="width:20%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compass -->
+      <div id="compass">
+        <canvas id="compass-canvas" width="70" height="70"></canvas>
+      </div>
+
+      <!-- Controls panel -->
+      <div id="controls-panel">
+        <div class="ctrl-row"><span class="key">W</span><span class="ctrl-desc">ACCELERATE</span></div>
+        <div class="ctrl-row"><span class="key">S</span><span class="ctrl-desc">BRAKE / REVERSE</span></div>
+        <div class="ctrl-row">
+          <span class="key">A</span><span class="key">D</span>
+          <span class="ctrl-desc">STEER LEFT / RIGHT</span>
+        </div>
+        <div class="ctrl-divider"></div>
+        <div class="ctrl-row"><span class="key">SPACE</span><span class="ctrl-desc">🔥 DRIFT / HANDBRAKE</span></div>
+        <div class="ctrl-row"><span class="key">⇧</span><span class="ctrl-desc">NITRO BOOST</span></div>
+        <div class="ctrl-divider"></div>
+        <div class="ctrl-row"><span class="key">R</span><span class="ctrl-desc">RESET POSITION</span></div>
+        <div class="ctrl-row"><span class="key">C</span><span class="ctrl-desc">CAMERA MODE</span></div>
+      </div>
+
+      <!-- Gear box -->
+      <div id="gear-box">
+        <div class="gear-label" id="gear-label">GEAR</div>
+        <div id="gear-value">N</div>
+      </div>
+
+      <!-- Speedometer -->
+      <div id="speedometer">
+        <canvas id="speed-canvas" width="160" height="160"></canvas>
+        <div id="speed-text">
+          <div id="speed-value">0</div>
+          <div id="speed-unit">KM/H</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+  <!-- scene.js, vehicle.js, input.js, hud.js all merged into main.js -->
+</body>
+
+</html>

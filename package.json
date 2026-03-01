@@ -1,0 +1,17 @@
+{
+    "name": "scout-racer",
+    "version": "1.0.0",
+    "description": "M3A1 Scout Car - Three.js Vehicle Controller",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "three": "^0.171.0"
+    },
+    "devDependencies": {
+        "vite": "^6.1.0"
+    }
+}

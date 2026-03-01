@@ -761,9 +761,9 @@ async function init() {
         setProgress(88, 'BOX CAR (GLB FALLBACK)');
     }
 
-    // ── Add car to scene — spawn at the specific street point shown (X:-15 Z:-104)
+    // ── Add car to scene — spawn at the crossroad shown (X:-26 Z:44)
     scene.add(carRoot);
-    carRoot.position.set(-15, 0.1, -104);
+    carRoot.position.set(-26, 0.1, 44);
     carRoot.rotation.y = 0;
 
     // Init camPos behind car
@@ -955,7 +955,7 @@ function animate() {
     // Reset (R, one-shot)
     const rNow = keys['r'];
     if (rNow && !resetPressedLastFrame) {
-        carRoot.position.set(-15, 0.1, -104);   // reset to the start point
+        carRoot.position.set(-26, 0.1, 44);   // reset to the crossroad point
         carRoot.rotation.set(0, 0, 0);
         carSpeed = 0; carSteer = 0; boostFuel = 100;
         carVel.set(0, 0, 0);

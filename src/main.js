@@ -110,41 +110,51 @@ let resetPressedLastFrame = false;
 //  WEB AUDIO — ENGINE SOUND (no files needed)
 // ═══════════════════════════════════════════════════════════════
 let audioCtx = null, engineGain = null;
+let engineSource = null; // High-quality MP3 loop
 let engineOscA = null, engineOscB = null, engineOscC = null;
-let engineFilter = null, rumbleNode = null;
+let engineFilter = null;
 let driftGain = null;
+
+// New Gear & RPM Logic
+let currentGear = 1;
+let lastGear = 1;
+let engineRPM = 0; // 0.2 (idle) to 1.0 (redline)
 
 function initAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-    // --- Engine: Harmonic Stack ---
+    // ── Pre-load High-Quality Racing MP3 ──────────────────
+    fetch('models/u_xg7ssi08yr-race-car-362035.mp3')
+        .then(r => r.arrayBuffer())
+        .then(b => audioCtx.decodeAudioData(b))
+        .then(buf => {
+            engineSource = audioCtx.createBufferSource();
+            engineSource.buffer = buf;
+            engineSource.loop = true;
+            engineSource.connect(engineGain);
+            engineSource.start(0);
+            console.log("Pro Racing Sound Loaded ✓");
+        }).catch(err => console.warn("MP3 Audio failed, using procedural fallback.", err));
+
+    // ── Procedural Fallback Layer (Oscillators) ───────────
     engineOscA = audioCtx.createOscillator();
     engineOscB = audioCtx.createOscillator();
     engineOscC = audioCtx.createOscillator();
 
     engineOscA.type = 'sawtooth'; engineOscA.frequency.value = 55;
     engineOscB.type = 'square'; engineOscB.frequency.value = 57;
-    engineOscC.type = 'sawtooth'; engineOscC.frequency.value = 27; // Sub-rumble
+    engineOscC.type = 'sawtooth'; engineOscC.frequency.value = 27;
 
     engineFilter = audioCtx.createBiquadFilter();
     engineFilter.type = 'lowpass';
     engineFilter.frequency.value = 400;
-    engineFilter.Q.value = 4.5; // Resonant frequency for "engine" character
+    engineFilter.Q.value = 4.5;
 
     engineGain = audioCtx.createGain();
     engineGain.gain.value = 0.05;
 
-    // Distortion for growl
-    const dist = audioCtx.createWaveShaper();
-    const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) {
-        const x = (i / 128) - 1;
-        curve[i] = (Math.PI + 10) * x / (Math.PI + 10 * Math.abs(x));
-    }
-    dist.curve = curve;
-
-    engineOscA.connect(dist); dist.connect(engineFilter);
+    engineOscA.connect(engineFilter);
     engineOscB.connect(engineFilter);
     engineOscC.connect(engineFilter);
     engineFilter.connect(engineGain);
@@ -152,43 +162,90 @@ function initAudio() {
 
     engineOscA.start(); engineOscB.start(); engineOscC.start();
 
-    // --- Tire screech: Sharp Band-pass ---
+    // --- Tire screech ---
     const bufLen = audioCtx.sampleRate * 0.4;
     const noiseBuf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
     const nd = noiseBuf.getChannelData(0);
     for (let i = 0; i < bufLen; i++) nd[i] = Math.random() * 2 - 1;
     const noiseNode = audioCtx.createBufferSource();
     noiseNode.buffer = noiseBuf; noiseNode.loop = true;
-
     const bpf = audioCtx.createBiquadFilter();
     bpf.type = 'bandpass'; bpf.frequency.value = 1600; bpf.Q.value = 3.5;
-
     driftGain = audioCtx.createGain(); driftGain.gain.value = 0;
     noiseNode.connect(bpf); bpf.connect(driftGain); driftGain.connect(audioCtx.destination);
     noiseNode.start();
 }
 
 function updateAudio(speed, boosting, drifting) {
-    if (!audioCtx || !engineOscA) return;
+    if (!audioCtx || !engineGain) return;
     const kmh = Math.abs(speed) * 3.6;
 
-    // Engine pitch: richer harmonics
-    const base = 48 + (kmh / 160) * 110 + (boosting ? 35 : 0);
-    engineOscA.frequency.setTargetAtTime(base, audioCtx.currentTime, 0.04);
-    engineOscB.frequency.setTargetAtTime(base * 2.01, audioCtx.currentTime, 0.04);
-    engineOscC.frequency.setTargetAtTime(base * 0.5, audioCtx.currentTime, 0.04);
+    // ── Gear Shifting Logic ────────────────────────────
+    let gear = 1;
+    if (kmh < 20) gear = 1;
+    else if (kmh < 42) gear = 2;
+    else if (kmh < 75) gear = 3;
+    else gear = 4;
 
-    // Filter sweep: creates "revving" effect
-    const filterFreq = 180 + (kmh / 160) * 1200 + (boosting ? 400 : 0);
-    engineFilter.frequency.setTargetAtTime(filterFreq, audioCtx.currentTime, 0.06);
+    if (kmh < 0.5) gear = 1; // reset gear at stop
+
+    // Gear shift sound effect
+    if (gear !== lastGear) {
+        playGearShiftSound(gear > lastGear ? 'up' : 'down');
+        lastGear = gear;
+    }
+    currentGear = gear;
+
+    // RPM Calculation: RPM climbs within the gear range
+    let rpmBase = 0;
+    let rpmMax = 1;
+    if (gear === 1) { rpmBase = 0; rpmMax = 20; }
+    else if (gear === 2) { rpmBase = 20; rpmMax = 42; }
+    else if (gear === 3) { rpmBase = 42; rpmMax = 75; }
+    else { rpmBase = 75; rpmMax = 220; }
+
+    // engineRPM should go from roughly 0.4 (start of gear) to 1.0 (end of gear)
+    engineRPM = 0.4 + (Math.min(kmh, rpmMax) - rpmBase) / (rpmMax - rpmBase) * 0.6;
+    if (kmh < 1) engineRPM = 0.2; // idle
+
+    // ── MP3 Engine Simulation ──────────────────────────
+    if (engineSource) {
+        const rate = 0.5 + engineRPM * 2.2 + (boosting ? 0.3 : 0);
+        engineSource.playbackRate.setTargetAtTime(rate, audioCtx.currentTime, 0.08);
+    }
+
+    // ── Procedural Layer Update ────────────────────────
+    if (engineOscA) {
+        const freq = 40 + engineRPM * 160 + (boosting ? 40 : 0);
+        engineOscA.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.04);
+        engineOscB.frequency.setTargetAtTime(freq * 1.5, audioCtx.currentTime, 0.04);
+        engineOscC.frequency.setTargetAtTime(freq * 0.5, audioCtx.currentTime, 0.04);
+
+        const f = 150 + engineRPM * 1800 + (boosting ? 500 : 0);
+        engineFilter.frequency.setTargetAtTime(f, audioCtx.currentTime, 0.07);
+    }
 
     // Volume scaling
-    const vol = 0.05 + (kmh / 160) * 0.15 + (boosting ? 0.05 : 0);
-    engineGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.04);
+    const vol = (engineSource ? 0.38 : 0.06) + (kmh / 160) * 0.12 + (boosting ? 0.08 : 0);
+    engineGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.06);
 
     // Tyre screech
     const screeVol = drifting ? 0.35 * Math.min(kmh / 40, 1) : 0;
     driftGain.gain.setTargetAtTime(screeVol, audioCtx.currentTime, 0.08);
+}
+
+function playGearShiftSound(dir) {
+    if (!audioCtx || soundMuted) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(dir === 'up' ? 120 : 80, now);
+    osc.frequency.exponentialRampToValueAtTime(10, now + 0.1);
+    g.gain.setValueAtTime(0.15, now);
+    g.gain.linearRampToValueAtTime(0, now + 0.1);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(); osc.stop(now + 0.1);
 }
 
 // Kick audio on any user interaction

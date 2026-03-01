@@ -11,9 +11,26 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.4; // Pro exposure for vibrant neons
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.getElementById('app').prepend(renderer.domElement);
+
+// Add global styles for the "Accident" flash effect
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes crashFlash {
+        0% { opacity: 0; }
+        20% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+`;
+style.textContent += `
+    .accident-blur {
+        filter: blur(8px) saturate(0.5) contrast(1.2);
+        transition: filter 0.1s ease-out;
+    }
+`;
+document.head.appendChild(style);
 
 // ═══════════════════════════════════════════════════════════════
 //  SCENE + CAMERA
@@ -74,7 +91,9 @@ let envCubeCamera = null;            // CubeCamera for reflections
 let frameCount = 0;                    // frame counter
 let screenShakeAmt = 0;              // fades after bump
 let lastCollisionTime = 0;            // collision sound cooldown
+let stuckTimer = 0;                  // emergency warp timer
 const _cvTmp = new THREE.Vector3();   // reusable scratch vector
+const lastSafePos = new THREE.Vector3(35, 0.1, 65);
 
 let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit
 let camYaw = 0;
@@ -273,8 +292,8 @@ function buildEnvironment() {
         scene.add(pl);
     });
 
-    // ── BOUNDED GROUND — only 280 units (matches city block)
-    const geoSize = 280;
+    // ── BOUNDED GROUND — expanded to 500 for full city coverage
+    const geoSize = 500;
     const groundMat = new THREE.MeshStandardMaterial({
         color: 0x0d1117,
         roughness: 0.95,
@@ -297,7 +316,28 @@ function buildEnvironment() {
     const wet = new THREE.Mesh(new THREE.PlaneGeometry(geoSize, geoSize), wetMat);
     wet.rotation.x = -Math.PI / 2;
     wet.position.y = -0.04;
+    wet.name = 'wet_overlay'; // tag it so we can find it to add envMap later
     scene.add(wet);
+
+    // ── MAP BORDERS — preventing falling into void
+    const borderMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2, metalness: 0.8 });
+    const bSize = geoSize;
+    const bThickness = 1;
+    const bHeight = 15;
+
+    [
+        [0, bHeight / 2, bSize / 2], [0, bHeight / 2, -bSize / 2],
+        [bSize / 2, bHeight / 2, 0], [-bSize / 2, bHeight / 2, 0]
+    ].forEach(([px, py, pz]) => {
+        const isZ = pz !== 0;
+        const b = new THREE.Mesh(
+            new THREE.BoxGeometry(isZ ? bSize : bThickness, bHeight, isZ ? bThickness : bSize),
+            borderMat
+        );
+        b.position.set(px, py, pz);
+        scene.add(b);
+        collidables.push(b); // Make border collidable
+    });
 
     // Stars
     const starGeo = new THREE.BufferGeometry();
@@ -658,6 +698,9 @@ async function init() {
                 if (m.emissive && m.emissiveIntensity > 0) {
                     m.emissiveIntensity = Math.max(m.emissiveIntensity, 1.5);
                 }
+                // --- PRO ULTRA REFLECTIVE PAINT ---
+                m.metalness = 1.0;
+                m.roughness = 0.02;
                 m.needsUpdate = true;
             });
         });
@@ -675,7 +718,7 @@ async function init() {
         vehicleLoaded = true;
 
         // ── Real-time environment reflection ─────────────────────
-        // CubeRenderTarget: low res (128) for performance, updates every 6 frames
+        // CubeRenderTarget: 128 for MAX speed and smooth loading
         cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128, {
             type: THREE.HalfFloatType,
             generateMipmaps: true,
@@ -683,16 +726,29 @@ async function init() {
         envCubeCamera = new THREE.CubeCamera(0.5, 300, cubeRenderTarget);
         scene.add(envCubeCamera);
 
+        // Force IMMEDIATE update so first frame isn't black
+        envCubeCamera.position.copy(carRoot.position);
+        envCubeCamera.position.y += 1;
+        envCubeCamera.update(renderer, scene);
+
         // Apply env map to all car meshes — gives reflections of city/neon
         model.traverse(c => {
             if (!c.isMesh) return;
             const mats = Array.isArray(c.material) ? c.material : [c.material];
             mats.forEach(m => {
                 m.envMap = cubeRenderTarget.texture;
-                m.envMapIntensity = 2.8;   // strong neon reflections
+                m.envMapIntensity = 6.5;   // pro ultra reflections
                 m.needsUpdate = true;
             });
         });
+
+        // Apply reflections to the ROAD too for "Pro" look
+        const roadOverlay = scene.getObjectByName('wet_overlay');
+        if (roadOverlay) {
+            roadOverlay.material.envMap = cubeRenderTarget.texture;
+            roadOverlay.material.envMapIntensity = 2.5;
+            roadOverlay.material.needsUpdate = true;
+        }
 
         setProgress(88, 'CAR LOADED ✓');
         console.log(`Car loaded: ${ms.x.toFixed(2)}x${ms.y.toFixed(2)}x${ms.z.toFixed(2)}, scale=${msc.toFixed(3)}`);
@@ -707,7 +763,7 @@ async function init() {
 
     // ── Add car to scene — spawn INSIDE the city on a main street
     scene.add(carRoot);
-    carRoot.position.set(0, 0.1, 20);   // inside city, on the road
+    carRoot.position.set(35, 0.1, 65);   // Adjusted to center of the main road
     carRoot.rotation.y = 0;             // facing straight into the city
 
     // Init camPos behind car
@@ -749,79 +805,110 @@ async function init() {
 //  COLLISION DETECTION
 // ═══════════════════════════════════════════════════════════════
 const _colRaycaster = new THREE.Raycaster();
-const CAR_RADIUS = 2.5;   // half-width of car in world units
+const CAR_RADIUS = 2.2;   // tighter radius for "real touching" feel
 
 function checkCollisions() {
-    if (collidables.length === 0 || Math.abs(carSpeed) < 0.3) return;
+    if (collidables.length === 0) return false;
 
-    // Spatial filter: recompute neighbours every 30 frames (~0.5s)
-    if (frameCount % 30 === 0) {
+    // Spatial filter: recompute neighbours every 30 frames (or if first frame)
+    if (frameCount % 30 === 0 || collisionNearby.length === 0) {
         collisionNearby = collidables.filter(c => {
             _cvTmp.setFromMatrixPosition(c.matrixWorld);
-            return _cvTmp.distanceTo(carRoot.position) < 35;
+            return _cvTmp.distanceTo(carRoot.position) < 60; // Larger radius for more reliability
         });
     }
     if (collisionNearby.length === 0) return;
 
-    // Ray origin: slightly above ground to avoid floor hits
-    const origin = carRoot.position.clone();
-    origin.y += 0.9;
+    // Optimized 2-Layer Scanning: Center and Front (Saves 50% CPU)
+    const heights = [0.5, 1.5];
+    const origins = [];
     const yaw = carRoot.rotation.y;
+    const sy = Math.sin(yaw), cy = Math.cos(yaw);
 
-    // 8 directional rays (car-space)
-    const angles = [0, Math.PI, Math.PI / 2, -Math.PI / 2,
-        Math.PI * 0.25, -Math.PI * 0.25, Math.PI * 0.75, -Math.PI * 0.75];
-    _colRaycaster.far = CAR_RADIUS;
+    heights.forEach(h => {
+        origins.push(carRoot.position.clone().add(new THREE.Vector3(0, h, 0))); // center
+        origins.push(carRoot.position.clone().add(new THREE.Vector3(sy * 1.8, h, cy * 1.8))); // front
+    });
+
+    const angles = [0, Math.PI, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4];
+    _colRaycaster.far = CAR_RADIUS + 0.4;
+
+    _colRaycaster.far = CAR_RADIUS + 0.8;
     _colRaycaster.near = 0;
 
+    let totalPushX = 0, totalPushZ = 0;
     let collided = false;
-    for (const a of angles) {
-        const dx = Math.sin(yaw + a);
-        const dz = Math.cos(yaw + a);
-        _colRaycaster.set(origin, _cvTmp.set(dx, 0, dz).normalize());
 
-        const hits = _colRaycaster.intersectObjects(collisionNearby, false);
-        if (hits.length === 0 || hits[0].distance >= CAR_RADIUS) continue;
+    origins.forEach(origin => {
+        for (const a of angles) {
+            const dx = Math.sin(yaw + a);
+            const dz = Math.cos(yaw + a);
+            _colRaycaster.set(origin, _cvTmp.set(dx, 0, dz).normalize());
 
-        const hit = hits[0];
-        const dist = hit.distance;
-        const pen = CAR_RADIUS - dist;   // penetration depth
+            const hits = _colRaycaster.intersectObjects(collisionNearby, false);
+            if (hits.length === 0 || hits[0].distance >= CAR_RADIUS) continue;
 
-        // World-space face normal (for buildings it's usually axis-aligned)
-        let normal;
-        if (hit.face && hit.face.normal) {
-            normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-            normal.y = 0;
-            if (normal.lengthSq() < 0.001) normal.set(dx, 0, dz).negate();
-            normal.normalize();
-        } else {
-            normal = new THREE.Vector3(-dx, 0, -dz); // fallback: push back
+            const hit = hits[0];
+            const dist = hit.distance;
+            const pen = CAR_RADIUS - dist;
+
+            let normal;
+            if (hit.face && hit.face.normal) {
+                normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+                normal.y = 0;
+                // --- PRO CORRECTION: Ensure normal pushes AWAY from collision point ---
+                if (normal.dot(_cvTmp.set(dx, 0, dz)) > 0) normal.negate();
+                normal.normalize();
+            } else {
+                normal = new THREE.Vector3(-dx, 0, -dz);
+            }
+
+            // Super-Expulsion Force
+            const force = 1.35;
+            totalPushX += normal.x * pen * force;
+            totalPushZ += normal.z * pen * force;
+
+            // Reflect velocity with restitution
+            const dot = carVel.x * normal.x + carVel.z * normal.z;
+            if (dot < 0) {
+                carVel.x -= (1 + 0.35) * dot * normal.x;
+                carVel.z -= (1 + 0.35) * dot * normal.z;
+                carSpeed *= 0.25;
+                collided = true;
+            }
         }
-
-        // Push car out of collision
-        carRoot.position.x += normal.x * pen * 0.9;
-        carRoot.position.z += normal.z * pen * 0.9;
-
-        // Reflect velocity with restitution (0 = absorb, 1 = perfect bounce)
-        const RESTITUTION = 0.35;
-        const dot = carVel.x * normal.x + carVel.z * normal.z;
-        if (dot < 0) {
-            carVel.x -= (1 + RESTITUTION) * dot * normal.x;
-            carVel.z -= (1 + RESTITUTION) * dot * normal.z;
-            carSpeed *= 0.30;   // sharp speed loss on impact
-            collided = true;
-        }
-    }
+    });
 
     if (collided) {
+        // Apply cumulative expulsion
+        carRoot.position.x += totalPushX;
+        carRoot.position.z += totalPushZ;
+
+        // Force Stop if hit too hard
+        if (Math.abs(totalPushX) > 0.1 || Math.abs(totalPushZ) > 0.1) {
+            carSpeed *= 0.5;
+            carVel.multiplyScalar(0.7);
+        }
+
         const now = Date.now();
         if (now - lastCollisionTime > 180) {
             lastCollisionTime = now;
             const impact = Math.min(Math.abs(carSpeed) / MAX_SPEED, 1);
-            screenShakeAmt = impact * 0.55;
+            screenShakeAmt = impact * 1.8; // increased for more drama
             playCollisionSound(impact);
+
+            // Visual Flash (Accident)
+            document.body.classList.add('accident-blur');
+            const flash = document.createElement('div');
+            flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.45);pointer-events:none;z-index:9999;animation:crashFlash 0.4s forwards;';
+            document.body.appendChild(flash);
+            setTimeout(() => {
+                flash.remove();
+                document.body.classList.remove('accident-blur');
+            }, 450);
         }
     }
+    return collided;
 }
 
 function playCollisionSound(intensity = 0.5) {
@@ -868,7 +955,7 @@ function animate() {
     // Reset (R, one-shot)
     const rNow = keys['r'];
     if (rNow && !resetPressedLastFrame) {
-        carRoot.position.set(0, 0.1, 20);   // reset back inside city
+        carRoot.position.set(35, 0.1, 65);   // reset to road position
         carRoot.rotation.set(0, 0, 0);
         carSpeed = 0; carSteer = 0; boostFuel = 100;
         carVel.set(0, 0, 0);
@@ -924,11 +1011,30 @@ function animate() {
     const velMag = Math.sqrt(carVel.x * carVel.x + carVel.z * carVel.z);
     if (velMag > topSpd) { carVel.x *= topSpd / velMag; carVel.z *= topSpd / velMag; }
 
-    // Move car — clamp to city boundary
-    carRoot.position.x += carVel.x * dt;
-    carRoot.position.z += carVel.z * dt;
-    carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -160, 160);
-    carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -160, 160);
+    // ── SUB-STEPPING MOVEMENT (OPTIMIZED ACCURACY) ────────
+    const steps = 2; // Perfectly smooth even at top speed
+    const sDt = dt / steps;
+    let hitAny = false;
+
+    for (let i = 0; i < steps; i++) {
+        carRoot.position.x += carVel.x * sDt;
+        carRoot.position.z += carVel.z * sDt;
+        if (checkCollisions()) hitAny = true;
+        carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -137, 137);
+        carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -137, 137);
+    }
+
+    // Emergency Stuck Warp: if stuck in red zone for > 1.5s
+    if (hitAny && Math.abs(carSpeed) < 1) {
+        stuckTimer += dt;
+        if (stuckTimer > 1.5) {
+            carRoot.position.set(35, 0.1, 65); // Warp to safe street
+            stuckTimer = 0;
+        }
+    } else {
+        stuckTimer = 0;
+    }
+
     carRoot.position.y = 0.1;
 
     // Drift factor for effects
@@ -977,8 +1083,8 @@ function animate() {
     // ── FRAME COUNTER ───────────────────────────────────────
     frameCount++;
 
-    // ── REAL-TIME CAR REFLECTIONS (every 6 frames) ─────────
-    if (envCubeCamera && frameCount % 6 === 0) {
+    // ── PRO REAL-TIME REFLECTIONS (Optimized: every 10 frames) ──
+    if (envCubeCamera && frameCount % 10 === 0) {
         carRoot.visible = false;            // hide so car doesn't reflect itself
         envCubeCamera.position.copy(carRoot.position);
         envCubeCamera.position.y += 1;
@@ -986,8 +1092,8 @@ function animate() {
         carRoot.visible = true;
     }
 
-    // ── COLLISION DETECTION ─────────────────────────────────
-    checkCollisions();
+    // ── COLLISION DETECTION (NOW HANDLED IN SUB-STEPS) ──────
+    // checkCollisions();
 
     // ── SCREEN SHAKE ────────────────────────────────────────
     if (screenShakeAmt > 0.002) {

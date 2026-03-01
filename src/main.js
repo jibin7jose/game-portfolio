@@ -106,6 +106,10 @@ let carWheels = [];
 let camSwitchedLastFrame = false;
 let resetPressedLastFrame = false;
 
+let carModel = null; // Reference for chassis animation (dive/tilt)
+let brakeMaterials = []; // Materials for tail/brake lights
+let lastSpeed = 0;   // for detecting sudden stops
+
 // ═══════════════════════════════════════════════════════════════
 //  WEB AUDIO — ENGINE SOUND (no files needed)
 // ═══════════════════════════════════════════════════════════════
@@ -798,6 +802,12 @@ async function init() {
                 // --- PRO ULTRA REFLECTIVE PAINT ---
                 m.metalness = 1.0;
                 m.roughness = 0.02;
+
+                // Detect Brake Lights (Tail lights)
+                const n = m.name.toLowerCase();
+                if (n.includes('tail') || n.includes('brake') || n.includes('light_red')) {
+                    brakeMaterials.push(m);
+                }
                 m.needsUpdate = true;
             });
         });
@@ -812,6 +822,7 @@ async function init() {
         model.position.set(-mc.x * msc, -mb.min.y * msc, -mc.z * msc);
 
         carRoot.add(model);
+        carModel = model; // Global reference for animations
         vehicleLoaded = true;
 
         // ── Real-time environment reflection ─────────────────────
@@ -1107,6 +1118,34 @@ function animate() {
         const turnRate = carSteer * speedPct * 2.8 * Math.sign(carSpeed);
         carRoot.rotation.y += turnRate * dt;
     }
+
+    // ── CHASSIS ANIMATION (Dive & Roll) ──────────────────
+    if (carModel) {
+        // 1. Acceleration/Braking Pitch (Dive)
+        const accel = (carSpeed - lastSpeed) / dt;
+        const targetPitch = THREE.MathUtils.clamp(-accel * 0.008, -0.06, 0.06);
+        carModel.rotation.x += (targetPitch - carModel.rotation.x) * (1 - Math.exp(-8 * dt));
+
+        // 2. Steering Roll (Leaning away from turns)
+        const targetRoll = -carSteer * speedPct * 0.12 * Math.sign(carSpeed);
+        carModel.rotation.z += (targetRoll - carModel.rotation.z) * (1 - Math.exp(-6 * dt));
+    }
+
+    // ── BRAKE LIGHTS ANIMATION ─────────────────────────
+    if (brakeMaterials.length > 0) {
+        const isBraking = goBack && carSpeed > 0.5;
+        const targetEmissive = isBraking ? 15 : 1.5; // Intense glow vs dim
+        brakeMaterials.forEach(m => {
+            m.emissiveIntensity += (targetEmissive - m.emissiveIntensity) * (1 - Math.exp(-12 * dt));
+        });
+    }
+
+    // ── SUDDEN STOP DETECTION ────────────────────────────
+    if (Math.abs(lastSpeed) > 15 && Math.abs(carSpeed) < 2) {
+        // Trigger a jolt if we stop suddenly
+        screenShakeAmt = Math.min(screenShakeAmt + 1.2, 2.5);
+    }
+    lastSpeed = carSpeed;
 
     // ── DRIFT PHYSICS ──────────────────────────────────────
     const sy = Math.sin(carRoot.rotation.y);

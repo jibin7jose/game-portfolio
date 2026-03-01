@@ -181,12 +181,13 @@ function updateAudio(speed, boosting, drifting) {
     if (!audioCtx || !engineGain) return;
     const kmh = Math.abs(speed) * 3.6;
 
-    // ── Gear Shifting Logic (Slower/Smoother) ──────────
+    // ── Gear Shifting Logic (Slower/Smoother - 5 Gears) ──
     let targetGear = 1;
-    if (kmh < 22) targetGear = 1;
-    else if (kmh < 48) targetGear = 2;
-    else if (kmh < 85) targetGear = 3;
-    else targetGear = 4;
+    if (kmh < 20) targetGear = 1;
+    else if (kmh < 45) targetGear = 2;
+    else if (kmh < 75) targetGear = 3;
+    else if (kmh < 110) targetGear = 4;
+    else targetGear = 5;
 
     if (kmh < 0.5) targetGear = 1;
 
@@ -199,17 +200,18 @@ function updateAudio(speed, boosting, drifting) {
 
     // RPM Calculation: climbs within the gear range
     let rpmBase = 0, rpmMax = 1;
-    if (targetGear === 1) { rpmBase = 0; rpmMax = 22; }
-    else if (targetGear === 2) { rpmBase = 22; rpmMax = 48; }
-    else if (targetGear === 3) { rpmBase = 48; rpmMax = 85; }
-    else { rpmBase = 85; rpmMax = 220; }
+    if (targetGear === 1) { rpmBase = 0; rpmMax = 20; }
+    else if (targetGear === 2) { rpmBase = 20; rpmMax = 45; }
+    else if (targetGear === 3) { rpmBase = 45; rpmMax = 75; }
+    else if (targetGear === 4) { rpmBase = 75; rpmMax = 110; }
+    else { rpmBase = 110; rpmMax = 220; }
 
     let targetRPM = 0.4 + (Math.min(kmh, rpmMax) - rpmBase) / (rpmMax - rpmBase) * 0.6;
     if (kmh < 1) targetRPM = 0.15; // Clean Idle
 
-    // --- SMOOTHING: slowly blend currentAudioRPM toward targetRPM ---
-    // This makes gear shifts feel more natural/flowing (Slowly gear change)
-    const shiftSmoothing = (targetGear !== lastGear) ? 0.02 : 0.08;
+    // --- ULTRA SMOOTHING: very slowly blend currentAudioRPM toward targetRPM ---
+    // Reduced factors to make the transition even longer/slower
+    const shiftSmoothing = (targetGear !== lastGear) ? 0.012 : 0.05;
     currentAudioRPM += (targetRPM - currentAudioRPM) * shiftSmoothing;
 
     // ── MP3 Engine Simulation ──────────────────────────
@@ -536,7 +538,13 @@ function updateHUD(speed, yaw, pos) {
     document.getElementById('speed-value').textContent = Math.round(kmh);
 
     let gear = 'N';
-    if (speed > 0.5) { if (kmh < 20) gear = '1'; else if (kmh < 42) gear = '2'; else if (kmh < 75) gear = '3'; else gear = '4'; }
+    if (speed > 0.5) {
+        if (kmh < 20) gear = '1';
+        else if (kmh < 45) gear = '2';
+        else if (kmh < 75) gear = '3';
+        else if (kmh < 110) gear = '4';
+        else gear = '5';
+    }
     else if (speed < -0.3) gear = 'R';
     gearEl.textContent = gear;
 

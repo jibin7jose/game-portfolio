@@ -92,8 +92,10 @@ let frameCount = 0;                    // frame counter
 let screenShakeAmt = 0;              // fades after bump
 let lastCollisionTime = 0;            // collision sound cooldown
 let stuckTimer = 0;                  // emergency warp timer
-const _cvTmp = new THREE.Vector3();   // reusable scratch vector
-const lastSafePos = new THREE.Vector3(35, 0.1, 65);
+let isSpinningOut = false;
+let spinTimer = 0;
+const lastSafePos = new THREE.Vector3(17, 0.1, 40);
+const _cvTmp = new THREE.Vector3();
 
 let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit
 let camYaw = 0;
@@ -105,10 +107,6 @@ let carWheels = [];
 
 let camSwitchedLastFrame = false;
 let resetPressedLastFrame = false;
-
-let carModel = null; // Reference for chassis animation (dive/tilt)
-let brakeMaterials = []; // Materials for tail/brake lights
-let lastSpeed = 0;   // for detecting sudden stops
 
 // ═══════════════════════════════════════════════════════════════
 //  WEB AUDIO — ENGINE SOUND (no files needed)
@@ -802,12 +800,6 @@ async function init() {
                 // --- PRO ULTRA REFLECTIVE PAINT ---
                 m.metalness = 1.0;
                 m.roughness = 0.02;
-
-                // Detect Brake Lights (Tail lights)
-                const n = m.name.toLowerCase();
-                if (n.includes('tail') || n.includes('brake') || n.includes('light_red')) {
-                    brakeMaterials.push(m);
-                }
                 m.needsUpdate = true;
             });
         });
@@ -822,7 +814,6 @@ async function init() {
         model.position.set(-mc.x * msc, -mb.min.y * msc, -mc.z * msc);
 
         carRoot.add(model);
-        carModel = model; // Global reference for animations
         vehicleLoaded = true;
 
         // ── Real-time environment reflection ─────────────────────
@@ -1001,18 +992,24 @@ function checkCollisions() {
         const now = Date.now();
         if (now - lastCollisionTime > 180) {
             lastCollisionTime = now;
-            const impact = Math.min(Math.abs(carSpeed) / MAX_SPEED, 1);
-            screenShakeAmt = impact * 1.8; // increased for more drama
+            const impact = Math.min(Math.abs(carSpeed) / 45, 1.2);
+            screenShakeAmt = impact * 2.2;
             playCollisionSound(impact);
+
+            // ── HIGH COLLISION ACCIDENT LOGIC ──────────────────
+            if (impact > 0.82) {
+                isSpinningOut = true;
+                spinTimer = 1.6; // Duration of spinning accident
+            }
 
             // Visual Flash (Accident)
             document.body.classList.add('accident-blur');
             const flash = document.createElement('div');
-            flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.45);pointer-events:none;z-index:9999;animation:crashFlash 0.4s forwards;';
+            flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.5);pointer-events:none;z-index:9999;animation:crashFlash 0.4s forwards;';
             document.body.appendChild(flash);
             setTimeout(() => {
                 flash.remove();
-                document.body.classList.remove('accident-blur');
+                if (!isSpinningOut) document.body.classList.remove('accident-blur');
             }, 450);
         }
     }
@@ -1071,6 +1068,33 @@ function animate() {
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
 
+    // ── ACCIDENT SPIN-OUT SEQUENCE ───────────────────────
+    if (isSpinningOut) {
+        spinTimer -= dt;
+        carRoot.rotation.y += dt * 18; // Cinematic Spinning
+        carVel.multiplyScalar(0.96);
+        carSpeed *= 0.96;
+        screenShakeAmt = 1.2;
+
+        if (spinTimer <= 0) {
+            isSpinningOut = false;
+            document.body.classList.remove('accident-blur');
+            // Auto Reset back to start
+            carRoot.position.set(17, 0.1, 40);
+            carRoot.rotation.set(0, Math.PI, 0);
+            carSpeed = 0; carVel.set(0, 0, 0);
+        }
+
+        // Update visuals during crash
+        updateHUD(carSpeed, carRoot.rotation.y, carRoot.position);
+        updateAudio(carSpeed, false, true);
+        updateParticles(dt, carRoot.position, carRoot.rotation.y, 25);
+        if (frameCount % 60 === 0) updateReflections();
+        renderer.render(scene, camera);
+        frameCount++;
+        return; // Block user control during crash
+    }
+
     // ── Read keys ──────────────────────────────────────────
     const goFwd = keys['w'] || keys['arrowup'];
     const goBack = keys['s'] || keys['arrowdown'];
@@ -1118,34 +1142,6 @@ function animate() {
         const turnRate = carSteer * speedPct * 2.8 * Math.sign(carSpeed);
         carRoot.rotation.y += turnRate * dt;
     }
-
-    // ── CHASSIS ANIMATION (Dive & Roll) ──────────────────
-    if (carModel) {
-        // 1. Acceleration/Braking Pitch (Dive)
-        const accel = (carSpeed - lastSpeed) / dt;
-        const targetPitch = THREE.MathUtils.clamp(-accel * 0.008, -0.06, 0.06);
-        carModel.rotation.x += (targetPitch - carModel.rotation.x) * (1 - Math.exp(-8 * dt));
-
-        // 2. Steering Roll (Leaning away from turns)
-        const targetRoll = -carSteer * speedPct * 0.12 * Math.sign(carSpeed);
-        carModel.rotation.z += (targetRoll - carModel.rotation.z) * (1 - Math.exp(-6 * dt));
-    }
-
-    // ── BRAKE LIGHTS ANIMATION ─────────────────────────
-    if (brakeMaterials.length > 0) {
-        const isBraking = goBack && carSpeed > 0.5;
-        const targetEmissive = isBraking ? 15 : 1.5; // Intense glow vs dim
-        brakeMaterials.forEach(m => {
-            m.emissiveIntensity += (targetEmissive - m.emissiveIntensity) * (1 - Math.exp(-12 * dt));
-        });
-    }
-
-    // ── SUDDEN STOP DETECTION ────────────────────────────
-    if (Math.abs(lastSpeed) > 15 && Math.abs(carSpeed) < 2) {
-        // Trigger a jolt if we stop suddenly
-        screenShakeAmt = Math.min(screenShakeAmt + 1.2, 2.5);
-    }
-    lastSpeed = carSpeed;
 
     // ── DRIFT PHYSICS ──────────────────────────────────────
     const sy = Math.sin(carRoot.rotation.y);

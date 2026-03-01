@@ -61,11 +61,11 @@ window.addEventListener('contextmenu', e => e.preventDefault());
 // ═══════════════════════════════════════════════════════════════
 //  PHYSICS CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-const MAX_SPEED = 28;
-const BOOST_SPEED = 48;
-const ACCEL = 22;
-const BRAKE_FORCE = 42;
-const REV_SPEED = 10;
+const MAX_SPEED = 62;
+const BOOST_SPEED = 90;
+const ACCEL = 26;
+const BRAKE_FORCE = 48;
+const REV_SPEED = 12;
 const MAX_STEER = 0.52;
 const STEER_RATE = 5.5;
 
@@ -181,12 +181,12 @@ function updateAudio(speed, boosting, drifting) {
     if (!audioCtx || !engineGain) return;
     const kmh = Math.abs(speed) * 3.6;
 
-    // ── Gear Shifting Logic (Slower/Smoother - 5 Gears) ──
+    // ── Gear Shifting Logic (High-Speed Calibration) ──
     let targetGear = 1;
-    if (kmh < 20) targetGear = 1;
-    else if (kmh < 45) targetGear = 2;
-    else if (kmh < 75) targetGear = 3;
-    else if (kmh < 110) targetGear = 4;
+    if (kmh < 35) targetGear = 1;
+    else if (kmh < 80) targetGear = 2;
+    else if (kmh < 140) targetGear = 3;
+    else if (kmh < 220) targetGear = 4;
     else targetGear = 5;
 
     if (kmh < 0.5) targetGear = 1;
@@ -200,11 +200,11 @@ function updateAudio(speed, boosting, drifting) {
 
     // RPM Calculation: climbs within the gear range
     let rpmBase = 0, rpmMax = 1;
-    if (targetGear === 1) { rpmBase = 0; rpmMax = 20; }
-    else if (targetGear === 2) { rpmBase = 20; rpmMax = 45; }
-    else if (targetGear === 3) { rpmBase = 45; rpmMax = 75; }
-    else if (targetGear === 4) { rpmBase = 75; rpmMax = 110; }
-    else { rpmBase = 110; rpmMax = 220; }
+    if (targetGear === 1) { rpmBase = 0; rpmMax = 35; }
+    else if (targetGear === 2) { rpmBase = 35; rpmMax = 80; }
+    else if (targetGear === 3) { rpmBase = 80; rpmMax = 140; }
+    else if (targetGear === 4) { rpmBase = 140; rpmMax = 220; }
+    else { rpmBase = 220; rpmMax = 340; }
 
     let targetRPM = 0.4 + (Math.min(kmh, rpmMax) - rpmBase) / (rpmMax - rpmBase) * 0.6;
     if (kmh < 1) targetRPM = 0.15; // Clean Idle
@@ -463,7 +463,7 @@ let engineTemp = 20;
 
 function drawSpeedometer(kmh) {
     const W = 160, H = 160, cx = 80, cy = 80, R = 66;
-    const pct = Math.min(kmh / 160, 1);
+    const pct = Math.min(kmh / 320, 1);
     speedCtx.clearRect(0, 0, W, H);
 
     // bg
@@ -539,10 +539,10 @@ function updateHUD(speed, yaw, pos) {
 
     let gear = 'N';
     if (speed > 0.5) {
-        if (kmh < 20) gear = '1';
-        else if (kmh < 45) gear = '2';
-        else if (kmh < 75) gear = '3';
-        else if (kmh < 110) gear = '4';
+        if (kmh < 35) gear = '1';
+        else if (kmh < 80) gear = '2';
+        else if (kmh < 140) gear = '3';
+        else if (kmh < 220) gear = '4';
         else gear = '5';
     }
     else if (speed < -0.3) gear = 'R';

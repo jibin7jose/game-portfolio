@@ -761,10 +761,10 @@ async function init() {
         setProgress(88, 'BOX CAR (GLB FALLBACK)');
     }
 
-    // ── Add car to scene — spawn at the position shown in latest screenshot (X:17 Z:40)
+    // ── Add car to scene — spawn at the position shown (X:17 Z:40) facing buildings (180 deg)
     scene.add(carRoot);
     carRoot.position.set(17, 0.1, 40);
-    carRoot.rotation.y = 0;
+    carRoot.rotation.y = Math.PI;
 
     // Init camPos behind car
     const sy0 = Math.sin(carRoot.rotation.y), cy0 = Math.cos(carRoot.rotation.y);
@@ -956,7 +956,7 @@ function animate() {
     const rNow = keys['r'];
     if (rNow && !resetPressedLastFrame) {
         carRoot.position.set(17, 0.1, 40);   // reset to the specified street point
-        carRoot.rotation.set(0, 0, 0);
+        carRoot.rotation.set(0, Math.PI, 0); // rotated 180 deg to face buildings
         carSpeed = 0; carSteer = 0; boostFuel = 100;
         carVel.set(0, 0, 0);
         driftFactor = 0;

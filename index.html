@@ -73,6 +73,31 @@
       letter-spacing: 0.12em;
     }
 
+    #pickup-counter {
+      position: absolute;
+      bottom: 18.5rem;
+      right: 2.5rem;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      text-align: right;
+      min-width: 140px;
+    }
+
+    #pickup-counter .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1rem;
+      color: #66ff99;
+      text-shadow: 0 0 12px rgba(102, 255, 153, 0.5);
+      letter-spacing: 0.12em;
+    }
+
     #speed-canvas {
       border-radius: 50%;
     }
@@ -879,6 +904,12 @@
       <div id="drift-score">
         DRIFT SCORE
         <span class="value" id="drift-score-value">0</span>
+      </div>
+
+      <!-- Pickups -->
+      <div id="pickup-counter">
+        RECON CORES
+        <span class="value" id="pickup-value">0 / 0</span>
       </div>
     </div>
 

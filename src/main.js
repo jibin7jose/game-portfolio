@@ -275,6 +275,9 @@ let driftScore = 0;
 let driftCombo = 0;
 let driftBankTimer = 0;
 let hudHidden = false;
+let pickupMeshes = [];
+let pickupCollected = 0;
+let pickupTotal = 0;
 
 // Velocity vector for drift simulation
 const carVel = new THREE.Vector3();
@@ -923,6 +926,47 @@ function initMissions() {
     });
 }
 
+function initPickups() {
+    const count = lowQuality ? 10 : 18;
+    const geo = new THREE.OctahedronGeometry(1.2, 0);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x66ff99,
+        emissive: 0x66ff99,
+        emissiveIntensity: 2.5,
+        transparent: true,
+        opacity: 0.85
+    });
+
+    for (let i = 0; i < count; i++) {
+        const core = new THREE.Mesh(geo, mat.clone());
+        const px = (Math.random() - 0.5) * 260;
+        const pz = (Math.random() - 0.5) * 260;
+        core.position.set(px, 1.2 + Math.random() * 1.5, pz);
+        core.userData.collected = false;
+        scene.add(core);
+        pickupMeshes.push(core);
+    }
+
+    pickupCollected = 0;
+    pickupTotal = pickupMeshes.length;
+    if (pickupValueEl) pickupValueEl.textContent = `${pickupCollected} / ${pickupTotal}`;
+}
+
+function updatePickups(dt) {
+    if (pickupMeshes.length === 0) return;
+    pickupMeshes.forEach(core => {
+        if (core.userData.collected) return;
+        core.rotation.y += dt * 1.2;
+        core.position.y += Math.sin(Date.now() * 0.002 + core.position.x) * 0.004;
+        if (carRoot.position.distanceTo(core.position) < 3.2) {
+            core.userData.collected = true;
+            core.visible = false;
+            pickupCollected += 1;
+            if (pickupValueEl) pickupValueEl.textContent = `${pickupCollected} / ${pickupTotal}`;
+        }
+    });
+}
+
 function startMission() {
     missionActive = true;
     missionIndex = 0;
@@ -1122,6 +1166,7 @@ const nitroFlashEl = document.getElementById('nitro-flash');
 const missionHudEl = document.getElementById('mission-hud');
 const photoModeEl = document.getElementById('photo-mode');
 const driftScoreEl = document.getElementById('drift-score-value');
+const pickupValueEl = document.getElementById('pickup-value');
 let engineTemp = 20;
 
 function drawSpeedometer(kmh) {
@@ -1357,6 +1402,7 @@ async function init() {
     setupWeather();
     initMissions();
     initDriftSmoke();
+    initPickups();
     setWeatherMode(0);
     setTimeOfDay(0);
 
@@ -1973,6 +2019,7 @@ function animate() {
     if (photoMode) {
         updateWeather(dt);
         updateTraffic(dt);
+        updatePickups(dt);
         updatePhotoControls(dt);
         updateSpeedLines(0, false, dt);
         mouseDX = 0; mouseDY = 0;
@@ -2120,6 +2167,7 @@ function animate() {
     updateSpeedLines(carSpeed, boosting, dt);
     updateWeather(dt);
     updateTraffic(dt);
+    updatePickups(dt);
     if (window.envSmoke) {
         window.envSmoke.rotation.y -= dt * 0.03; // Animate environmental smoke
     }

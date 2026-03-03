@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { resumeData } from './resume_data.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER
@@ -107,6 +108,12 @@ let carWheels = [];
 
 let camSwitchedLastFrame = false;
 let resetPressedLastFrame = false;
+
+// Resume RECON logic state
+let currentActiveResume = null;
+let resumeMarkers = [];
+const SCAN_RANGE = 12;
+const SCAN_READY_RANGE = 20;
 
 // ═══════════════════════════════════════════════════════════════
 //  WEB AUDIO — ENGINE SOUND (no files needed)
@@ -345,8 +352,8 @@ function buildEnvironment() {
     // Deep night sky
     scene.background = new THREE.Color(0x050810);
 
-    // Dense night fog — hides edge of world but still shows city
-    scene.fog = new THREE.FogExp2(0x060912, 0.006);
+    // Dense night fog — clear enough to see buildings, thick enough for atmosphere
+    scene.fog = new THREE.FogExp2(0x060912, 0.003);
 
     // Strong ambient — must be high enough to show GLB textures
     const amb = new THREE.AmbientLight(0x6688cc, 3.8);
@@ -370,8 +377,8 @@ function buildEnvironment() {
     const hemi = new THREE.HemisphereLight(0x223366, 0xff6600, 0.7);
     scene.add(hemi);
 
-    // Neon street point lights
-    [
+    // Neon street point lights — duplicated for 4 Tiles
+    const lights = [
         { c: 0xff003c, p: [20, 8, 30] },
         { c: 0x00ffcc, p: [-25, 8, 20] },
         { c: 0xff8800, p: [40, 8, -20] },
@@ -379,40 +386,23 @@ function buildEnvironment() {
         { c: 0x00aaff, p: [0, 8, -50] },
         { c: 0xff0088, p: [-60, 8, 10] },
         { c: 0xffcc00, p: [60, 8, 10] },
-    ].forEach(({ c, p }) => {
-        const pl = new THREE.PointLight(c, 4.5, 70, 1.6);
-        pl.position.set(...p);
-        scene.add(pl);
+    ];
+
+    [
+        { x: -175, z: -175 }, { x: 175, z: -175 },
+        { x: -175, z: 175 }, { x: 175, z: 175 }
+    ].forEach(off => {
+        lights.forEach(({ c, p }) => {
+            const pl = new THREE.PointLight(c, 4.5, 70, 1.6);
+            pl.position.set(p[0] + off.x, p[1], p[2] + off.z);
+            scene.add(pl);
+        });
     });
 
-    // ── BOUNDED GROUND — tightened to 220 to match city core area
-    const geoSize = 220;
-    const groundMat = new THREE.MeshStandardMaterial({
-        color: 0x0d1117,
-        roughness: 0.95,
-        metalness: 0.08,
-    });
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(geoSize, geoSize), groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.06;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    // ── GROUND SYSTEM — Will be filled by loadRoads() GLB tiling
+    const geoSize = 720;
 
-    // Reflective wet overlay
-    const wetMat = new THREE.MeshStandardMaterial({
-        color: 0x1a2535,
-        roughness: 0.04,
-        metalness: 0.55,
-        transparent: true,
-        opacity: 0.4,
-    });
-    const wet = new THREE.Mesh(new THREE.PlaneGeometry(geoSize, geoSize), wetMat);
-    wet.rotation.x = -Math.PI / 2;
-    wet.position.y = -0.04;
-    wet.name = 'wet_overlay'; // tag it so we can find it to add envMap later
-    scene.add(wet);
-
-    // ── MAP BORDERS — preventing falling into void
+    // ── MAP BORDERS — Expanded
     const borderMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2, metalness: 0.8 });
     const bSize = geoSize;
     const bThickness = 1;
@@ -431,6 +421,43 @@ function buildEnvironment() {
         scene.add(b);
         collidables.push(b); // Make border collidable
     });
+
+    // ── VOLUMETRIC ENVIRONMENTAL SMOKE ──
+    const smokeCanvas = document.createElement('canvas');
+    smokeCanvas.width = 128;
+    smokeCanvas.height = 128;
+    const sctx = smokeCanvas.getContext('2d');
+    const grad = sctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(255,255,255,0.15)'); // Subtle center
+    grad.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, 128, 128);
+
+    const smokeGeo = new THREE.BufferGeometry();
+    const smokeCount = 3500; // Balanced coverage
+    const smokePositions = new Float32Array(smokeCount * 3);
+
+    for (let i = 0; i < smokeCount; i++) {
+        smokePositions[i * 3] = (Math.random() - 0.5) * 1600;      // Mega-city X spread
+        smokePositions[i * 3 + 1] = Math.random() * 80 + 5;        // From near-ground (5) to 85 above car
+        smokePositions[i * 3 + 2] = (Math.random() - 0.5) * 1600;  // Mega-city Z spread
+    }
+    smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
+
+    const smokeMat = new THREE.PointsMaterial({
+        size: 80, // Balanced smoke clouds
+        map: new THREE.CanvasTexture(smokeCanvas),
+        transparent: true,
+        opacity: 0.35, // Subtle atmospheric smoke
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        color: 0x334a66 // Dark cinematic mist
+    });
+
+    const envSmoke = new THREE.Points(smokeGeo, smokeMat);
+    scene.add(envSmoke);
+    window.envSmoke = envSmoke; // Save for animation loop
 
     // Stars
     const starGeo = new THREE.BufferGeometry();
@@ -727,36 +754,54 @@ async function init() {
 
         // After scale: center X/Z, sit bottom at Y=0
         const scaledBox = new THREE.Box3().setFromObject(city);
-        city.position.set(
+        const actualSize = scaledBox.getSize(new THREE.Vector3());
+
+        const centerOffset = new THREE.Vector3(
             -scaledBox.getCenter(new THREE.Vector3()).x,
             -scaledBox.min.y,
             -scaledBox.getCenter(new THREE.Vector3()).z
         );
+        city.position.copy(centerOffset);
 
         // ── Fix floating props: hide any mesh above 60 world units
-        //    or whose world-space center is far outside the city footprint
-        const cityFootprint = 200; // half-width in world units
-        const maxHeight = 55;  // world units — reasonable for buildings
-        scene.add(city);           // add first so world transforms are valid
-        city.traverse(c => {
-            if (!c.isMesh) return;
-            const wb = new THREE.Box3().setFromObject(c);
-            const wc = wb.getCenter(new THREE.Vector3());
-            if (wc.y > maxHeight ||
-                Math.abs(wc.x) > cityFootprint ||
-                Math.abs(wc.z) > cityFootprint) {
-                c.visible = false;  // hide outlier props
-            }
+        // Tightened footprint to remove "boundary" empty spaces in GLB
+        const cityFootprint = 145;
+        const maxHeight = 55;
+
+        // Spread tiles based on their dense footprint, not total raw bbox
+        const offX = 130;
+        const offZ = 130;
+
+        const offsets = [
+            { x: -offX, z: -offZ }, { x: offX, z: -offZ },
+            { x: -offX, z: offZ }, { x: offX, z: offZ }
+        ];
+
+        offsets.forEach((off, i) => {
+            const tile = i === 0 ? city : city.clone();
+            tile.position.x += off.x;
+            tile.position.z += off.z;
+            scene.add(tile);
+
+            tile.traverse(c => {
+                if (!c.isMesh) return;
+                const wb = new THREE.Box3().setFromObject(c);
+                const wc = wb.getCenter(new THREE.Vector3());
+
+                // Hide if too high or outside the "dense" square to allow tight tiling
+                if (wc.y > maxHeight ||
+                    Math.abs(wc.x - off.x) > cityFootprint ||
+                    Math.abs(wc.z - off.z) > cityFootprint) {
+                    c.visible = false;
+                }
+
+                if (!c.visible) return;
+                if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
+                collidables.push(c);
+            });
         });
 
-        // Collect visible city meshes for collision detection
-        // Pre-compute bounding spheres so spatial filter is fast
-        city.traverse(c => {
-            if (!c.isMesh || !c.visible) return;
-            if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
-            collidables.push(c);
-        });
-        console.log(`HK City: ${collidables.length} collidable meshes, scale=${sc.toFixed(2)}`);
+        console.log(`HK Mega-City (4 Connected Tiles): ${collidables.length} collidables`);
         setProgress(62, 'CITY LOADED ✓');
 
     } catch (err) {
@@ -765,7 +810,57 @@ async function init() {
     }
 
     // ════════════════════════════════════════════════════════════
-    // 2. LOAD CAR (car.glb)
+    // 2. LOAD ROAD SYSTEM (Tiled asphalt model)
+    // ════════════════════════════════════════════════════════════
+    setProgress(63, 'TILING ROAD SYSTEM...');
+    try {
+        const roadGltf = await new Promise((res, rej) => cityLoader.load(
+            '/models/patch_in_asfalt_road_-_free.glb', res, undefined, rej
+        ));
+        const roadModel = roadGltf.scene;
+
+        // Scale it to a manageable square size
+        const rb = new THREE.Box3().setFromObject(roadModel);
+        const rSize = rb.getSize(new THREE.Vector3());
+        let TILE_SCALE = 1.0;
+        if (rSize.x > 0.001 && rSize.z > 0.001) {
+            TILE_SCALE = 100 / Math.max(rSize.x, rSize.z);
+        }
+        // Squash the Y axis drastically to make the road completely flat and remove slopes
+        roadModel.scale.set(TILE_SCALE, 0.001, TILE_SCALE);
+
+        // Ensure its rotation is flat
+        roadModel.rotation.set(0, 0, 0);
+
+        const TILE_DIM = 98; // larger tiles for better performance
+        const GRID_SIZE = 4; // 9x9 grid to cover ~800 units
+
+        // Dark base plane just in case of microscopic seams
+        const baseGeo = new THREE.PlaneGeometry(1000, 1000);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 1.0 });
+        const base = new THREE.Mesh(baseGeo, baseMat);
+        base.rotation.x = -Math.PI / 2;
+        base.position.y = -0.2; // slightly below roads
+        scene.add(base);
+
+        for (let x = -GRID_SIZE; x <= GRID_SIZE; x++) {
+            for (let z = -GRID_SIZE; z <= GRID_SIZE; z++) {
+                const tr = roadModel.clone();
+                tr.position.set(x * TILE_DIM, -0.05, z * TILE_DIM);
+                tr.receiveShadow = true;
+                scene.add(tr);
+            }
+        }
+        setProgress(64, 'ROAD SYSTEM LOADED ✓');
+    } catch (err) {
+        console.warn('Road loading failed:', err);
+        // Fallback ground if road GLB fails
+        const g = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        g.rotation.x = -Math.PI / 2; g.position.y = -0.1; scene.add(g);
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // 3. LOAD CAR (car.glb)
     // ════════════════════════════════════════════════════════════
     setProgress(65, 'LOADING VEHICLE...');
     let vehicleLoaded = false;
@@ -913,7 +1008,7 @@ function checkCollisions() {
     if (frameCount % 30 === 0 || collisionNearby.length === 0) {
         collisionNearby = collidables.filter(c => {
             _cvTmp.setFromMatrixPosition(c.matrixWorld);
-            return _cvTmp.distanceTo(carRoot.position) < 60; // Larger radius for more reliability
+            return _cvTmp.distanceTo(carRoot.position) < 120; // Expanded for larger tiles
         });
     }
     if (collisionNearby.length === 0) return;
@@ -1176,8 +1271,8 @@ function animate() {
         carRoot.position.x += carVel.x * sDt;
         carRoot.position.z += carVel.z * sDt;
         if (checkCollisions()) hitAny = true;
-        carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -108, 108);
-        carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -108, 108);
+        carRoot.position.x = THREE.MathUtils.clamp(carRoot.position.x, -355, 355);
+        carRoot.position.z = THREE.MathUtils.clamp(carRoot.position.z, -355, 355);
     }
 
     // Emergency Stuck Warp: if stuck in red zone for > 1.5s
@@ -1232,6 +1327,9 @@ function animate() {
 
     // ── Particles ──────────────────────────────────────────
     updateParticles(dt, carRoot.position, carRoot.rotation.y, carSpeed);
+    if (window.envSmoke) {
+        window.envSmoke.rotation.y -= dt * 0.03; // Animate environmental smoke
+    }
 
     // ── Camera ─────────────────────────────────────────────
     updateCamera(dt);
@@ -1262,8 +1360,125 @@ function animate() {
     // ── HUD ────────────────────────────────────────────────
     updateHUD(carSpeed, carRoot.rotation.y, carRoot.position);
 
+    // ── RESUME SCAN LOGIC ──────────────────────────────────
+    updateResumeLogic(dt);
+
     mouseDX = 0; mouseDY = 0;
     renderer.render(scene, camera);
+}
+
+function updateResumeLogic(dt) {
+    const carPos = carRoot.position;
+    let closestSection = null;
+    let minDist = Infinity;
+
+    resumeMarkers.forEach(m => {
+        const dist = carPos.distanceTo(m.marker.position);
+        // Pulse animation for markers
+        m.marker.children[2].rotation.y += dt * 1.5;
+        m.marker.children[2].rotation.x += dt * 0.8;
+        m.marker.position.y = 0.5 + Math.sin(Date.now() * 0.003) * 0.1;
+
+        if (dist < minDist) {
+            minDist = dist;
+            closestSection = m;
+        }
+    });
+
+    const promptEl = document.getElementById('resume-prompt');
+    const containerEl = document.getElementById('resume-container');
+    const titleEl = document.getElementById('resume-title');
+    const contentEl = document.getElementById('resume-content');
+
+    if (!promptEl || !containerEl) return;
+
+    if (closestSection && minDist < SCAN_READY_RANGE) {
+        if (minDist < SCAN_RANGE) {
+            // In scan range
+            if (currentActiveResume !== closestSection.data.id) {
+                currentActiveResume = closestSection.data.id;
+                titleEl.textContent = closestSection.data.title;
+                contentEl.innerHTML = closestSection.data.content;
+                containerEl.classList.add('active');
+                promptEl.classList.remove('active');
+            }
+        } else {
+            // Near but not scanning
+            promptEl.classList.add('active');
+            promptEl.textContent = `APPROACH [${closestSection.data.title}] FOR RECON`;
+            if (currentActiveResume) {
+                containerEl.classList.remove('active');
+                currentActiveResume = null;
+            }
+        }
+    } else {
+        // Out of range
+        promptEl.classList.remove('active');
+        if (currentActiveResume) {
+            containerEl.classList.remove('active');
+            currentActiveResume = null;
+        }
+    }
+}
+
+function initResumeMarkers() {
+    resumeData.forEach(section => {
+        const group = new THREE.Group();
+        group.position.set(section.position.x, 0.5, section.position.z);
+
+        // Cyber cylinder marker
+        const cylGeo = new THREE.CylinderGeometry(2, 2, 0.1, 32);
+        const cylMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            transparent: true,
+            opacity: 0.6,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 5
+        });
+        const cyl = new THREE.Mesh(cylGeo, cylMat);
+        group.add(cyl);
+
+        // Vertical beams
+        const beamGeo = new THREE.CylinderGeometry(0.05, 0.05, 15, 8);
+        const beamMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            transparent: true,
+            opacity: 0.2,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 2
+        });
+        const beam = new THREE.Mesh(beamGeo, beamMat);
+        beam.position.y = 7.5;
+        group.add(beam);
+
+        // Floating icon (simple cube/diamond for now)
+        const iconGeo = new THREE.OctahedronGeometry(1.2, 0);
+        const iconMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 8,
+            wireframe: true
+        });
+        const icon = new THREE.Mesh(iconGeo, iconMat);
+        icon.position.y = 2;
+        group.add(icon);
+
+        scene.add(group);
+        resumeMarkers.push({ marker: group, data: section });
+
+        // Add floor marking
+        const floorGeo = new THREE.RingGeometry(2.5, 3, 32);
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.set(section.position.x, 0.01, section.position.z);
+        scene.add(floor);
+    });
 }
 
 // ── Resize ────────────────────────────────────────────────────
@@ -1273,4 +1488,5 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+initResumeMarkers();
 init();

@@ -14,7 +14,7 @@ let mouseSteerSensitivity = 0.012;
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER
 // ═══════════════════════════════════════════════════════════════
-const renderer = new THREE.WebGLRenderer({ antialias: !lowQuality });
+const renderer = new THREE.WebGLRenderer({ antialias: !lowQuality, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = !lowQuality;
@@ -300,9 +300,6 @@ let camYaw = 0;
 let camPitch = 0.35;
 let speedLines = null;
 let speedLineOffsets = null;
-let trailLine = null;
-let trailPositions = null;
-let trailIndex = 0;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -1006,37 +1003,6 @@ function updateSpeedLines(speed, boosting, dt) {
     pos.needsUpdate = true;
 }
 
-function initTrail() {
-    const max = lowQuality ? 80 : 140;
-    trailPositions = new Float32Array(max * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.4 });
-    trailLine = new THREE.Line(geo, mat);
-    trailLine.frustumCulled = false;
-    scene.add(trailLine);
-}
-
-function updateTrail(pos, speed) {
-    if (!trailLine || !trailPositions) return;
-    const max = trailPositions.length / 3;
-    trailPositions[trailIndex * 3] = pos.x;
-    trailPositions[trailIndex * 3 + 1] = pos.y + 0.05;
-    trailPositions[trailIndex * 3 + 2] = pos.z;
-    trailIndex = (trailIndex + 1) % max;
-
-    const render = trailLine.geometry.attributes.position.array;
-    for (let i = 0; i < max; i++) {
-        const src = (trailIndex + i) % max;
-        render[i * 3] = trailPositions[src * 3];
-        render[i * 3 + 1] = trailPositions[src * 3 + 1];
-        render[i * 3 + 2] = trailPositions[src * 3 + 2];
-    }
-    trailLine.geometry.attributes.position.needsUpdate = true;
-    const kmh = Math.abs(speed) * 3.6;
-    trailLine.material.opacity = 0.15 + Math.min(kmh / 160, 1) * 0.45;
-}
-
 function initDriftSmoke() {
     const count = lowQuality ? 140 : 240;
     const geo = new THREE.BufferGeometry();
@@ -1088,11 +1054,16 @@ function updateDriftSmoke(dt, pos, yaw, speed, drifting) {
 
 function captureSnapshot() {
     try {
-        const url = renderer.domElement.toDataURL('image/png');
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `scout_${Date.now()}.png`;
-        a.click();
+        renderer.render(scene, camera);
+        renderer.domElement.toBlob(blob => {
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `scout_${Date.now()}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }, 'image/png');
     } catch (err) {
         console.warn('Snapshot failed:', err);
     }
@@ -1347,7 +1318,6 @@ async function init() {
     buildEnvironment();
     setupWeather();
     initMissions();
-    initTrail();
     initDriftSmoke();
     setWeatherMode(0);
 
@@ -1862,7 +1832,6 @@ function animate() {
         updateAudio(carSpeed, false, true);
         updateParticles(dt, carRoot.position, carRoot.rotation.y, 25);
         updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, true);
-        updateTrail(carRoot.position, carSpeed);
         updateSpeedLines(carSpeed, false, dt);
         updateWeather(dt);
         updateTraffic(dt);
@@ -2103,7 +2072,6 @@ function animate() {
     // ── Particles ──────────────────────────────────────────
     updateParticles(dt, carRoot.position, carRoot.rotation.y, carSpeed);
     updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, isDrifting);
-    updateTrail(carRoot.position, carSpeed);
     updateSpeedLines(carSpeed, boosting, dt);
     updateWeather(dt);
     updateTraffic(dt);

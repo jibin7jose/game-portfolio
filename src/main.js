@@ -310,6 +310,11 @@ let rainPoints = null;
 let rainVel = null;
 let lightningLight = null;
 let lightningTimer = 0;
+let timeOfDay = 0; // 0=night, 1=dawn
+let envAmbient = null;
+let envMoon = null;
+let envHemi = null;
+let envNeonLights = [];
 let trafficCurve = null;
 let trafficCurveLen = 1;
 let trafficCars = [];
@@ -333,6 +338,7 @@ let weatherPressedLastFrame = false;
 let missionPressedLastFrame = false;
 let photoPressedLastFrame = false;
 let hudPressedLastFrame = false;
+let timePressedLastFrame = false;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -589,6 +595,7 @@ function buildEnvironment() {
 
     // Strong ambient — must be high enough to show GLB textures
     const amb = new THREE.AmbientLight(0x6688cc, 3.8);
+    envAmbient = amb;
     scene.add(amb);
 
     // Moonlight — cool directional, strong
@@ -603,10 +610,12 @@ function buildEnvironment() {
     moon.shadow.camera.top = 200;
     moon.shadow.camera.bottom = -200;
     moon.shadow.bias = -0.0003;
+    envMoon = moon;
     scene.add(moon);
 
     // Warm city bounce — orange under-fill
     const hemi = new THREE.HemisphereLight(0x223366, 0xff6600, 0.7);
+    envHemi = hemi;
     scene.add(hemi);
 
     // Neon street point lights — duplicated for 4 Tiles
@@ -630,6 +639,7 @@ function buildEnvironment() {
             const pl = new THREE.PointLight(c, lightIntensity, 70, 1.6);
             pl.position.set(p[0] + off.x, p[1], p[2] + off.z);
             scene.add(pl);
+            envNeonLights.push(pl);
         });
     });
 
@@ -796,6 +806,33 @@ function setWeatherMode(mode) {
     if (roadOverlay && roadOverlay.material) {
         roadOverlay.material.opacity = weatherMode === 0 ? 0.12 : weatherMode === 1 ? 0.32 : 0.45;
         roadOverlay.material.needsUpdate = true;
+    }
+}
+
+function setTimeOfDay(mode) {
+    timeOfDay = mode;
+    if (timeOfDay === 0) {
+        scene.background = new THREE.Color(0x050810);
+        if (scene.fog) scene.fog.color = new THREE.Color(0x060912);
+        if (envAmbient) envAmbient.intensity = 3.8;
+        if (envMoon) envMoon.intensity = 3.2;
+        if (envHemi) {
+            envHemi.color.setHex(0x223366);
+            envHemi.groundColor.setHex(0xff6600);
+            envHemi.intensity = 0.7;
+        }
+        envNeonLights.forEach(l => { l.intensity = lowQuality ? 3.2 : 4.5; });
+    } else {
+        scene.background = new THREE.Color(0x9bb7d6);
+        if (scene.fog) scene.fog.color = new THREE.Color(0xb4c7df);
+        if (envAmbient) envAmbient.intensity = 2.2;
+        if (envMoon) envMoon.intensity = 1.2;
+        if (envHemi) {
+            envHemi.color.setHex(0xcfd9e8);
+            envHemi.groundColor.setHex(0xe6d7b8);
+            envHemi.intensity = 0.9;
+        }
+        envNeonLights.forEach(l => { l.intensity = lowQuality ? 1.4 : 2.2; });
     }
 }
 
@@ -1178,7 +1215,8 @@ function updateHUD(speed, yaw, pos) {
     if (statusMiniEl) {
         const wLabel = weatherMode === 0 ? 'CLEAR' : weatherMode === 1 ? 'RAIN' : 'STORM';
         const mLabel = missionActive ? 'ON' : 'OFF';
-        statusMiniEl.textContent = `WEATHER: ${wLabel} | MISSION: ${mLabel}`;
+        const tLabel = timeOfDay === 0 ? 'NIGHT' : 'DAWN';
+        statusMiniEl.textContent = `WEATHER: ${wLabel} | TIME: ${tLabel} | MISSION: ${mLabel}`;
     }
 
     if (driftScoreEl) {
@@ -1320,6 +1358,7 @@ async function init() {
     initMissions();
     initDriftSmoke();
     setWeatherMode(0);
+    setTimeOfDay(0);
 
     // ── DRACO loader for city (may be Draco-compressed)
     const draco = new DRACOLoader();
@@ -1917,6 +1956,12 @@ function animate() {
         captureSnapshot();
     }
     snapshotPressedLastFrame = oNow;
+
+    const nNow = keys['n'];
+    if (nNow && !timePressedLastFrame) {
+        setTimeOfDay(timeOfDay === 0 ? 1 : 0);
+    }
+    timePressedLastFrame = nNow;
 
     const hNow = keys['h'];
     if (hNow && !hudPressedLastFrame) {

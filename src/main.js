@@ -271,6 +271,10 @@ let driftFactor = 0;    // 0=no drift, 1=full drift
 let driftSmoke = 0;
 let throttleInput = 0;
 let brakeInput = 0;
+let driftScore = 0;
+let driftCombo = 0;
+let driftBankTimer = 0;
+let hudHidden = false;
 
 // Velocity vector for drift simulation
 const carVel = new THREE.Vector3();
@@ -294,6 +298,16 @@ const _cvTmp = new THREE.Vector3();
 let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit
 let camYaw = 0;
 let camPitch = 0.35;
+let speedLines = null;
+let speedLineOffsets = null;
+let trailLine = null;
+let trailPositions = null;
+let trailIndex = 0;
+let driftSmokePts = null;
+let driftSmokeLife = null;
+let driftSmokeVel = null;
+let driftSmokeIndex = 0;
+let snapshotPressedLastFrame = false;
 let weatherMode = 0; // 0=clear 1=rain 2=storm
 let rainPoints = null;
 let rainVel = null;
@@ -321,6 +335,7 @@ let photoSpeed = 28;
 let weatherPressedLastFrame = false;
 let missionPressedLastFrame = false;
 let photoPressedLastFrame = false;
+let hudPressedLastFrame = false;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -720,6 +735,29 @@ function buildEnvironment() {
     scene.add(new THREE.Points(starGeo,
         new THREE.PointsMaterial({ color: 0xffffff, size: 0.7, sizeAttenuation: true, transparent: true, opacity: 0.75 })
     ));
+
+    // Speed lines (camera-space streaks)
+    const lineCount = lowQuality ? 60 : 120;
+    const lineGeo = new THREE.BufferGeometry();
+    const linePos = new Float32Array(lineCount * 6);
+    speedLineOffsets = new Float32Array(lineCount * 3);
+    for (let i = 0; i < lineCount; i++) {
+        const idx = i * 6;
+        const sx = (Math.random() - 0.5) * 2.2;
+        const sy = (Math.random() - 0.5) * 1.4;
+        const sz = -Math.random() * 8 - 1;
+        linePos[idx] = sx; linePos[idx + 1] = sy; linePos[idx + 2] = sz;
+        linePos[idx + 3] = sx; linePos[idx + 4] = sy; linePos[idx + 5] = sz - 1.8;
+        speedLineOffsets[i * 3] = (Math.random() - 0.5) * 2.2;
+        speedLineOffsets[i * 3 + 1] = (Math.random() - 0.5) * 1.4;
+        speedLineOffsets[i * 3 + 2] = -Math.random() * 8 - 1;
+    }
+    lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.0 });
+    speedLines = new THREE.LineSegments(lineGeo, lineMat);
+    speedLines.position.z = -2;
+    camera.add(speedLines);
+    scene.add(camera);
 }
 
 function setupWeather() {
@@ -909,7 +947,7 @@ function togglePhotoMode() {
         hudEl.style.opacity = '0';
     } else {
         if (photoModeEl) photoModeEl.classList.remove('active');
-        hudEl.style.opacity = '1';
+        hudEl.style.opacity = hudHidden ? '0' : '1';
     }
 }
 
@@ -948,6 +986,118 @@ function updatePhotoControls(dt) {
     camera.lookAt(lookAt);
 }
 
+function updateSpeedLines(speed, boosting, dt) {
+    if (!speedLines || !speedLineOffsets) return;
+    const kmh = Math.abs(speed) * 3.6;
+    const intensity = Math.min(kmh / 120, 1) * (boosting ? 1.3 : 1);
+    speedLines.material.opacity = 0.6 * intensity;
+
+    const pos = speedLines.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 2) {
+        const oIdx = (i / 2) * 3;
+        let z = speedLineOffsets[oIdx + 2] + speed * dt * 0.4;
+        if (z > -1) z = -12 - Math.random() * 6;
+        speedLineOffsets[oIdx + 2] = z;
+        const x = speedLineOffsets[oIdx];
+        const y = speedLineOffsets[oIdx + 1];
+        pos.setXYZ(i, x, y, z);
+        pos.setXYZ(i + 1, x, y, z - 1.8 - intensity * 2.2);
+    }
+    pos.needsUpdate = true;
+}
+
+function initTrail() {
+    const max = lowQuality ? 80 : 140;
+    trailPositions = new Float32Array(max * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(max * 3), 3));
+    const mat = new THREE.LineBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.4 });
+    trailLine = new THREE.Line(geo, mat);
+    trailLine.frustumCulled = false;
+    scene.add(trailLine);
+}
+
+function updateTrail(pos, speed) {
+    if (!trailLine || !trailPositions) return;
+    const max = trailPositions.length / 3;
+    trailPositions[trailIndex * 3] = pos.x;
+    trailPositions[trailIndex * 3 + 1] = pos.y + 0.05;
+    trailPositions[trailIndex * 3 + 2] = pos.z;
+    trailIndex = (trailIndex + 1) % max;
+
+    const render = trailLine.geometry.attributes.position.array;
+    for (let i = 0; i < max; i++) {
+        const src = (trailIndex + i) % max;
+        render[i * 3] = trailPositions[src * 3];
+        render[i * 3 + 1] = trailPositions[src * 3 + 1];
+        render[i * 3 + 2] = trailPositions[src * 3 + 2];
+    }
+    trailLine.geometry.attributes.position.needsUpdate = true;
+    const kmh = Math.abs(speed) * 3.6;
+    trailLine.material.opacity = 0.15 + Math.min(kmh / 160, 1) * 0.45;
+}
+
+function initDriftSmoke() {
+    const count = lowQuality ? 140 : 240;
+    const geo = new THREE.BufferGeometry();
+    const arr = new Float32Array(count * 3).fill(0);
+    for (let i = 0; i < count; i++) arr[i * 3 + 1] = -9999;
+    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    const mat = new THREE.PointsMaterial({
+        color: 0x888888,
+        size: 0.7,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false
+    });
+    driftSmokePts = new THREE.Points(geo, mat);
+    scene.add(driftSmokePts);
+    driftSmokeLife = new Float32Array(count);
+    driftSmokeVel = Array.from({ length: count }, () => new THREE.Vector3());
+}
+
+function updateDriftSmoke(dt, pos, yaw, speed, drifting) {
+    if (!driftSmokePts || !driftSmokeLife) return;
+    const p = driftSmokePts.geometry.attributes.position;
+    const sy = Math.sin(yaw), cy = Math.cos(yaw);
+
+    if (drifting && Math.abs(speed) > 6) {
+        for (let i = 0; i < 2; i++) {
+            const idx = driftSmokeIndex;
+            const rx = (Math.random() - 0.5) * 0.8;
+            const rz = (Math.random() - 0.5) * 0.8;
+            const bx = pos.x - sy * 1.9 + rx;
+            const bz = pos.z - cy * 1.9 + rz;
+            p.setXYZ(idx, bx, pos.y + 0.1, bz);
+            driftSmokeLife[idx] = 1;
+            driftSmokeVel[idx].set((Math.random() - 0.5) * 1.6, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 1.6);
+            driftSmokeIndex = (driftSmokeIndex + 1) % driftSmokeLife.length;
+        }
+    }
+
+    for (let i = 0; i < driftSmokeLife.length; i++) {
+        if (driftSmokeLife[i] > 0) {
+            driftSmokeLife[i] -= dt * 1.4;
+            p.setXYZ(i, p.getX(i) + driftSmokeVel[i].x * dt, p.getY(i) + driftSmokeVel[i].y * dt, p.getZ(i) + driftSmokeVel[i].z * dt);
+        } else {
+            p.setXYZ(i, 0, -9999, 0);
+        }
+    }
+    driftSmokePts.geometry.attributes.position.needsUpdate = true;
+}
+
+function captureSnapshot() {
+    try {
+        const url = renderer.domElement.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `scout_${Date.now()}.png`;
+        a.click();
+    } catch (err) {
+        console.warn('Snapshot failed:', err);
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  HUD
 // ═══════════════════════════════════════════════════════════════
@@ -963,6 +1113,7 @@ const engineFillEl = document.getElementById('engine-fill');
 const nitroFlashEl = document.getElementById('nitro-flash');
 const missionHudEl = document.getElementById('mission-hud');
 const photoModeEl = document.getElementById('photo-mode');
+const driftScoreEl = document.getElementById('drift-score-value');
 let engineTemp = 20;
 
 function drawSpeedometer(kmh) {
@@ -1057,6 +1208,10 @@ function updateHUD(speed, yaw, pos) {
         const wLabel = weatherMode === 0 ? 'CLEAR' : weatherMode === 1 ? 'RAIN' : 'STORM';
         const mLabel = missionActive ? 'ON' : 'OFF';
         statusMiniEl.textContent = `WEATHER: ${wLabel} | MISSION: ${mLabel}`;
+    }
+
+    if (driftScoreEl) {
+        driftScoreEl.textContent = Math.round(driftScore).toString();
     }
 
     const throttleActive = throttleInput > 0.1;
@@ -1192,6 +1347,8 @@ async function init() {
     buildEnvironment();
     setupWeather();
     initMissions();
+    initTrail();
+    initDriftSmoke();
     setWeatherMode(0);
 
     // ── DRACO loader for city (may be Draco-compressed)
@@ -1704,6 +1861,9 @@ function animate() {
         updateHUD(carSpeed, carRoot.rotation.y, carRoot.position);
         updateAudio(carSpeed, false, true);
         updateParticles(dt, carRoot.position, carRoot.rotation.y, 25);
+        updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, true);
+        updateTrail(carRoot.position, carSpeed);
+        updateSpeedLines(carSpeed, false, dt);
         updateWeather(dt);
         updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
@@ -1745,8 +1905,15 @@ function animate() {
     // Reset (R / Gamepad X / Mobile Reset, one-shot)
     const rNow = keys['r'] || touchState.reset || gamepadState.reset;
     if (rNow && !resetPressedLastFrame) {
-        carRoot.position.set(17, 0.1, 40);   // reset to the specified street point
-        carRoot.rotation.set(0, Math.PI, 0); // rotated 180 deg to face buildings
+        const safeSpots = [new THREE.Vector3(17, 0.1, 40), ...missionPoints];
+        let best = safeSpots[0];
+        let bestD = Infinity;
+        safeSpots.forEach(p => {
+            const d = carRoot.position.distanceTo(p);
+            if (d < bestD) { bestD = d; best = p; }
+        });
+        carRoot.position.copy(best);
+        carRoot.rotation.set(0, Math.PI, 0);
         carSpeed = 0; carSteer = 0; boostFuel = 100;
         carVel.set(0, 0, 0);
         driftFactor = 0;
@@ -1776,10 +1943,24 @@ function animate() {
     photoPressedLastFrame = pNow;
     touchState.photo = false;
 
+    const oNow = keys['o'];
+    if (oNow && !snapshotPressedLastFrame) {
+        captureSnapshot();
+    }
+    snapshotPressedLastFrame = oNow;
+
+    const hNow = keys['h'];
+    if (hNow && !hudPressedLastFrame) {
+        hudHidden = !hudHidden;
+        hudEl.style.opacity = hudHidden ? '0' : '1';
+    }
+    hudPressedLastFrame = hNow;
+
     if (photoMode) {
         updateWeather(dt);
         updateTraffic(dt);
         updatePhotoControls(dt);
+        updateSpeedLines(0, false, dt);
         mouseDX = 0; mouseDY = 0;
         renderer.render(scene, camera);
         return;
@@ -1862,6 +2043,21 @@ function animate() {
     // Drift factor for effects
     driftFactor = THREE.MathUtils.lerp(driftFactor, isDrifting ? 1 : 0, dt * 4);
 
+    // Drift scoring
+    const kmh = Math.abs(carSpeed) * 3.6;
+    if (isDrifting && kmh > 20) {
+        const steerAmt = Math.min(Math.abs(carSteer) / MAX_STEER, 1);
+        const add = (kmh * 0.02 + steerAmt * 6) * dt;
+        driftCombo += add;
+        driftBankTimer = 0.4;
+    } else {
+        driftBankTimer -= dt;
+        if (driftBankTimer <= 0 && driftCombo > 0) {
+            driftScore += driftCombo;
+            driftCombo = 0;
+        }
+    }
+
     // ── BOOST ──────────────────────────────────────────────
     if (boosting && Math.abs(carSpeed) > 0.5) {
         boostFuel = Math.max(0, boostFuel - 28 * dt);
@@ -1906,6 +2102,9 @@ function animate() {
 
     // ── Particles ──────────────────────────────────────────
     updateParticles(dt, carRoot.position, carRoot.rotation.y, carSpeed);
+    updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, isDrifting);
+    updateTrail(carRoot.position, carSpeed);
+    updateSpeedLines(carSpeed, boosting, dt);
     updateWeather(dt);
     updateTraffic(dt);
     if (window.envSmoke) {
@@ -1965,6 +2164,14 @@ function animate() {
 
     // ── COLLISION DETECTION (NOW HANDLED IN SUB-STEPS) ──────
     // checkCollisions();
+
+    // -- SPEED-BASED CAMERA SHAKE --
+    const speedShake = Math.min(Math.abs(carSpeed) / MAX_SPEED, 1) * 0.05;
+    if (speedShake > 0.002) {
+        camera.position.x += (Math.random() - 0.5) * speedShake;
+        camera.position.y += (Math.random() - 0.5) * speedShake * 0.5;
+        camera.position.z += (Math.random() - 0.5) * speedShake * 0.35;
+    }
 
     // ── SCREEN SHAKE ────────────────────────────────────────
     if (screenShakeAmt > 0.002) {

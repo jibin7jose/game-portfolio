@@ -3,14 +3,22 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { resumeData } from './resume_data.js';
 
+// Removed heavy post-processing imports to fix performance
+const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+const lowQuality = isMobileDevice || (navigator.deviceMemory && navigator.deviceMemory <= 4) || Math.min(window.innerWidth, window.innerHeight) < 720;
+const MAX_PIXEL_RATIO = lowQuality ? 1.25 : 2;
+const REFLECT_EVERY = lowQuality ? 20 : 10;
+const BASE_FOG_DENSITY = 0.003;
+let mouseSteerSensitivity = 0.012;
+
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER
 // ═══════════════════════════════════════════════════════════════
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !lowQuality });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !lowQuality;
+renderer.shadowMap.type = lowQuality ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.4; // Pro exposure for vibrant neons
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -37,27 +45,208 @@ document.head.appendChild(style);
 //  SCENE + CAMERA
 // ═══════════════════════════════════════════════════════════════
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 3000);
-camera.position.set(0, 12, 30);
+const BASE_FOV = 60;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 3000);
+// Start high up for a dramatic cinematic sweep-in
+camera.position.set(0, 80, -100);
+
+let introSweepDone = false;
+let sweepTime = 0;
 
 // ═══════════════════════════════════════════════════════════════
 //  INPUT
 // ═══════════════════════════════════════════════════════════════
 const keys = {};
+const touchState = {
+    steer: 0,
+    throttle: false,
+    brake: false,
+    boost: false,
+    handbrake: false,
+    camSwitch: false,
+    reset: false,
+    weather: false,
+    mission: false,
+    photo: false
+};
+const gamepadState = {
+    steer: 0,
+    throttle: 0,
+    brake: 0,
+    boost: false,
+    handbrake: false,
+    camSwitch: false,
+    reset: false
+};
+let lastGamepadButtons = [];
+let mouseButtons = 0;
+let mouseSteer = 0;
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
     // only prevent scroll keys
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase())) {
         e.preventDefault();
     }
+    if (e.key === '[') {
+        mouseSteerSensitivity = Math.max(0.004, mouseSteerSensitivity - 0.002);
+    }
+    if (e.key === ']') {
+        mouseSteerSensitivity = Math.min(0.03, mouseSteerSensitivity + 0.002);
+    }
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
 let mouseDX = 0, mouseDY = 0;
+window.addEventListener('mousedown', e => { mouseButtons = e.buttons; });
+window.addEventListener('mouseup', e => { mouseButtons = e.buttons; });
+window.addEventListener('mouseleave', () => { mouseButtons = 0; });
 window.addEventListener('mousemove', e => {
     if (e.buttons === 2) { mouseDX += e.movementX; mouseDY += e.movementY; }
+    if (mouseButtons & 1) {
+        mouseSteer = THREE.MathUtils.clamp(mouseSteer + e.movementX * mouseSteerSensitivity, -1, 1);
+    }
 });
 window.addEventListener('contextmenu', e => e.preventDefault());
+
+function setupMobileControls() {
+    const joystick = document.getElementById('touch-joystick');
+    const knob = joystick ? joystick.querySelector('.stick-knob') : null;
+    if (!joystick || !knob) return;
+
+    let active = false;
+    let pointerId = null;
+    const baseRect = () => joystick.getBoundingClientRect();
+    const radius = 46;
+
+    const updateKnob = (dx, dy) => {
+        const mag = Math.hypot(dx, dy) || 1;
+        const clamped = Math.min(mag, radius);
+        const nx = (dx / mag) * clamped;
+        const ny = (dy / mag) * clamped;
+        knob.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+        touchState.steer = THREE.MathUtils.clamp(nx / radius, -1, 1);
+    };
+
+    const resetKnob = () => {
+        knob.style.transform = 'translate(-50%, -50%)';
+        touchState.steer = 0;
+    };
+
+    joystick.addEventListener('pointerdown', e => {
+        initAudio();
+        active = true;
+        pointerId = e.pointerId;
+        joystick.setPointerCapture(pointerId);
+        const rect = baseRect();
+        updateKnob(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+    });
+
+    joystick.addEventListener('pointermove', e => {
+        if (!active || e.pointerId !== pointerId) return;
+        const rect = baseRect();
+        updateKnob(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+    });
+
+    joystick.addEventListener('pointerup', () => {
+        active = false;
+        pointerId = null;
+        resetKnob();
+    });
+    joystick.addEventListener('pointercancel', () => {
+        active = false;
+        pointerId = null;
+        resetKnob();
+    });
+
+    const holdBtn = (id, key) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const down = e => {
+            e.preventDefault();
+            initAudio();
+            touchState[key] = true;
+            el.classList.add('active');
+        };
+        const up = () => {
+            touchState[key] = false;
+            el.classList.remove('active');
+        };
+        el.addEventListener('pointerdown', down);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointerleave', up);
+        el.addEventListener('pointercancel', up);
+    };
+
+    const tapBtn = (id, key) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('pointerdown', e => {
+            e.preventDefault();
+            initAudio();
+            touchState[key] = true;
+            setTimeout(() => { touchState[key] = false; }, 0);
+        });
+    };
+
+    holdBtn('touch-accel', 'throttle');
+    holdBtn('touch-brake', 'brake');
+    holdBtn('touch-drift', 'handbrake');
+    holdBtn('touch-boost', 'boost');
+    tapBtn('touch-camera', 'camSwitch');
+    tapBtn('touch-reset', 'reset');
+    tapBtn('touch-weather', 'weather');
+    tapBtn('touch-mission', 'mission');
+    tapBtn('touch-photo', 'photo');
+}
+
+function applyDeadzone(v, dz) {
+    const a = Math.abs(v);
+    if (a < dz) return 0;
+    return (v - Math.sign(v) * dz) / (1 - dz);
+}
+
+function pollGamepad() {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = pads && pads.length ? (pads[0] || pads.find(p => p)) : null;
+    if (!pad) {
+        gamepadState.steer = 0;
+        gamepadState.throttle = 0;
+        gamepadState.brake = 0;
+        gamepadState.boost = false;
+        gamepadState.handbrake = false;
+        gamepadState.camSwitch = false;
+        gamepadState.reset = false;
+        lastGamepadButtons = [];
+        return;
+    }
+
+    const lx = applyDeadzone(pad.axes[0] || 0, 0.18);
+    gamepadState.steer = THREE.MathUtils.clamp(lx, -1, 1);
+
+    const rt = pad.buttons[7] ? pad.buttons[7].value : 0;
+    const lt = pad.buttons[6] ? pad.buttons[6].value : 0;
+    gamepadState.throttle = Math.min(Math.max(rt, 0), 1);
+    gamepadState.brake = Math.min(Math.max(lt, 0), 1);
+
+    const aBtn = pad.buttons[0] && pad.buttons[0].pressed;
+    const bBtn = pad.buttons[1] && pad.buttons[1].pressed;
+    const xBtn = pad.buttons[2] && pad.buttons[2].pressed;
+    const yBtn = pad.buttons[3] && pad.buttons[3].pressed;
+
+    gamepadState.handbrake = !!aBtn;
+    gamepadState.boost = !!bBtn;
+    gamepadState.camSwitch = !!yBtn && !lastGamepadButtons[3];
+    gamepadState.reset = !!xBtn && !lastGamepadButtons[2];
+
+    lastGamepadButtons = [
+        pad.buttons[0] && pad.buttons[0].pressed,
+        pad.buttons[1] && pad.buttons[1].pressed,
+        pad.buttons[2] && pad.buttons[2].pressed,
+        pad.buttons[3] && pad.buttons[3].pressed
+    ];
+}
+
+setupMobileControls();
 
 // ═══════════════════════════════════════════════════════════════
 //  PHYSICS CONSTANTS
@@ -80,6 +269,8 @@ let boostFuel = 100;
 let isDrifting = false;
 let driftFactor = 0;    // 0=no drift, 1=full drift
 let driftSmoke = 0;
+let throttleInput = 0;
+let brakeInput = 0;
 
 // Velocity vector for drift simulation
 const carVel = new THREE.Vector3();
@@ -95,12 +286,41 @@ let lastCollisionTime = 0;            // collision sound cooldown
 let stuckTimer = 0;                  // emergency warp timer
 let isSpinningOut = false;
 let spinTimer = 0;
+let brakeLightL = null;
+let brakeLightR = null;
 const lastSafePos = new THREE.Vector3(17, 0.1, 40);
 const _cvTmp = new THREE.Vector3();
 
 let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit
 let camYaw = 0;
 let camPitch = 0.35;
+let weatherMode = 0; // 0=clear 1=rain 2=storm
+let rainPoints = null;
+let rainVel = null;
+let lightningLight = null;
+let lightningTimer = 0;
+let trafficCurve = null;
+let trafficCurveLen = 1;
+let trafficCars = [];
+let missionActive = false;
+let missionIndex = 0;
+let missionStartTime = 0;
+let missionRings = [];
+let missionPoints = [
+    new THREE.Vector3(40, 0.2, 80),
+    new THREE.Vector3(-80, 0.2, 50),
+    new THREE.Vector3(-120, 0.2, -60),
+    new THREE.Vector3(60, 0.2, -120),
+    new THREE.Vector3(120, 0.2, 20)
+];
+let missionCooldown = 0;
+let photoMode = false;
+let photoYaw = 0;
+let photoPitch = 0.2;
+let photoSpeed = 28;
+let weatherPressedLastFrame = false;
+let missionPressedLastFrame = false;
+let photoPressedLastFrame = false;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -353,17 +573,17 @@ function buildEnvironment() {
     scene.background = new THREE.Color(0x050810);
 
     // Dense night fog — clear enough to see buildings, thick enough for atmosphere
-    scene.fog = new THREE.FogExp2(0x060912, 0.003);
+    scene.fog = new THREE.FogExp2(0x060912, BASE_FOG_DENSITY);
 
     // Strong ambient — must be high enough to show GLB textures
     const amb = new THREE.AmbientLight(0x6688cc, 3.8);
     scene.add(amb);
 
     // Moonlight — cool directional, strong
-    const moon = new THREE.DirectionalLight(0xaabbdd, 3.5);
+    const moon = new THREE.DirectionalLight(0xaabbdd, 3.2);
     moon.position.set(40, 120, -60);
     moon.castShadow = true;
-    moon.shadow.mapSize.set(2048, 2048);
+    moon.shadow.mapSize.set(lowQuality ? 1024 : 2048, lowQuality ? 1024 : 2048);
     moon.shadow.camera.near = 1;
     moon.shadow.camera.far = 500;
     moon.shadow.camera.left = -200;
@@ -388,12 +608,14 @@ function buildEnvironment() {
         { c: 0xffcc00, p: [60, 8, 10] },
     ];
 
+    const lightIntensity = lowQuality ? 3.2 : 4.5;
+    const lightList = lowQuality ? lights.slice(0, 4) : lights;
     [
         { x: -175, z: -175 }, { x: 175, z: -175 },
         { x: -175, z: 175 }, { x: 175, z: 175 }
     ].forEach(off => {
-        lights.forEach(({ c, p }) => {
-            const pl = new THREE.PointLight(c, 4.5, 70, 1.6);
+        lightList.forEach(({ c, p }) => {
+            const pl = new THREE.PointLight(c, lightIntensity, 70, 1.6);
             pl.position.set(p[0] + off.x, p[1], p[2] + off.z);
             scene.add(pl);
         });
@@ -435,7 +657,7 @@ function buildEnvironment() {
     sctx.fillRect(0, 0, 128, 128);
 
     const smokeGeo = new THREE.BufferGeometry();
-    const smokeCount = 3500; // Balanced coverage
+    const smokeCount = lowQuality ? 1200 : 3500; // Balanced coverage
     const smokePositions = new Float32Array(smokeCount * 3);
 
     for (let i = 0; i < smokeCount; i++) {
@@ -459,10 +681,34 @@ function buildEnvironment() {
     scene.add(envSmoke);
     window.envSmoke = envSmoke; // Save for animation loop
 
+    // ── GLOWING NEON GRID FLOOR (SYNTHWAVE VIBE) ──
+    const gridHelper = new THREE.GridHelper(1200, 120, 0x00ffcc, 0x004488);
+    gridHelper.position.y = -0.02; // Just above road
+    gridHelper.material.opacity = 0.5;
+    gridHelper.material.transparent = true;
+    scene.add(gridHelper);
+
+    // Cyber pillars removed based on user feedback
+
+    // ── FLOATING HOLO NODES ──
+    const hGeo = new THREE.OctahedronGeometry(2.5, 0);
+    const hMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0xffcc00, emissiveIntensity: 2, wireframe: true });
+    window.holoNodes = [];
+    const holoCount = lowQuality ? 22 : 50;
+    for (let i = 0; i < holoCount; i++) {
+        const h = new THREE.Mesh(hGeo, hMat);
+        let hx = (Math.random() - 0.5) * 1000;
+        let hz = (Math.random() - 0.5) * 1000;
+        h.position.set(hx, 3 + Math.random() * 12, hz);
+        scene.add(h);
+        window.holoNodes.push(h);
+    }
+
     // Stars
     const starGeo = new THREE.BufferGeometry();
-    const sp = new Float32Array(3000 * 3);
-    for (let i = 0; i < 3000; i++) {
+    const starCount = lowQuality ? 1200 : 3000;
+    const sp = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
         const r = 500 + Math.random() * 300;
         const t = Math.random() * Math.PI * 2;
         const p = Math.random() * Math.PI * 0.45;
@@ -476,6 +722,232 @@ function buildEnvironment() {
     ));
 }
 
+function setupWeather() {
+    const count = lowQuality ? 1200 : 3800;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    rainVel = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+        pos[i * 3] = (Math.random() - 0.5) * 900;
+        pos[i * 3 + 1] = Math.random() * 160 + 10;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * 900;
+        rainVel[i] = 22 + Math.random() * 18;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({
+        color: 0x88aaff,
+        size: lowQuality ? 0.15 : 0.2,
+        transparent: true,
+        opacity: 0.65,
+        depthWrite: false
+    });
+    rainPoints = new THREE.Points(geo, mat);
+    rainPoints.visible = false;
+    scene.add(rainPoints);
+
+    lightningLight = new THREE.PointLight(0xaad4ff, 0, 600, 2);
+    lightningLight.position.set(0, 120, 0);
+    scene.add(lightningLight);
+}
+
+function setWeatherMode(mode) {
+    weatherMode = mode;
+    if (rainPoints) rainPoints.visible = weatherMode > 0;
+    if (scene.fog) {
+        const mult = weatherMode === 0 ? 1 : weatherMode === 1 ? 1.6 : 2.2;
+        scene.fog.density = BASE_FOG_DENSITY * mult;
+    }
+    const roadOverlay = scene.getObjectByName('wet_overlay');
+    if (roadOverlay && roadOverlay.material) {
+        roadOverlay.material.opacity = weatherMode === 0 ? 0.12 : weatherMode === 1 ? 0.32 : 0.45;
+        roadOverlay.material.needsUpdate = true;
+    }
+}
+
+function updateWeather(dt) {
+    if (!rainPoints || weatherMode === 0) return;
+    const pos = rainPoints.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) - rainVel[i] * dt;
+        if (y < 0) y = 160 + Math.random() * 60;
+        pos.setY(i, y);
+        pos.setX(i, pos.getX(i) + 2.5 * dt);
+    }
+    pos.needsUpdate = true;
+
+    if (weatherMode === 2 && lightningLight) {
+        lightningTimer -= dt;
+        if (lightningTimer <= 0 && Math.random() < 0.04) {
+            lightningLight.intensity = 8 + Math.random() * 6;
+            lightningTimer = 0.2 + Math.random() * 0.3;
+        } else if (lightningLight.intensity > 0) {
+            lightningLight.intensity *= 0.8;
+            if (lightningLight.intensity < 0.2) lightningLight.intensity = 0;
+        }
+    }
+}
+
+function initTraffic() {
+    const points = [
+        new THREE.Vector3(-140, 0.1, -140),
+        new THREE.Vector3(140, 0.1, -140),
+        new THREE.Vector3(140, 0.1, 140),
+        new THREE.Vector3(-140, 0.1, 140)
+    ];
+    trafficCurve = new THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.8);
+    trafficCurveLen = trafficCurve.getLength();
+
+    const count = lowQuality ? 4 : 8;
+    const carGeo = new THREE.BoxGeometry(1.6, 0.6, 3.2);
+    const colors = [0xff3344, 0x33aaff, 0xffcc00, 0x55ff88, 0xbb66ff, 0xff8844];
+
+    for (let i = 0; i < count; i++) {
+        const mat = new THREE.MeshStandardMaterial({
+            color: colors[i % colors.length],
+            emissive: colors[i % colors.length],
+            emissiveIntensity: 0.6,
+            roughness: 0.4,
+            metalness: 0.6
+        });
+        const car = new THREE.Mesh(carGeo, mat);
+        car.castShadow = false;
+        car.receiveShadow = false;
+        car.userData.t = Math.random();
+        car.userData.speed = 12 + Math.random() * 10;
+        scene.add(car);
+        trafficCars.push(car);
+    }
+}
+
+function updateTraffic(dt) {
+    if (!trafficCurve || trafficCars.length === 0) return;
+    trafficCars.forEach(car => {
+        car.userData.t = (car.userData.t + (car.userData.speed * dt) / trafficCurveLen) % 1;
+        const pos = trafficCurve.getPointAt(car.userData.t);
+        const tangent = trafficCurve.getTangentAt(car.userData.t);
+        car.position.copy(pos);
+        car.position.y = 0.25;
+        car.rotation.y = Math.atan2(tangent.x, tangent.z);
+    });
+}
+
+function initMissions() {
+    const ringGeo = new THREE.TorusGeometry(6.5, 0.35, 10, 32);
+    missionPoints.forEach((p, idx) => {
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 2,
+            transparent: true,
+            opacity: 0.7
+        });
+        const ring = new THREE.Mesh(ringGeo, mat);
+        ring.position.copy(p);
+        ring.rotation.x = Math.PI / 2;
+        ring.visible = false;
+        ring.userData.index = idx;
+        scene.add(ring);
+        missionRings.push(ring);
+    });
+}
+
+function startMission() {
+    missionActive = true;
+    missionIndex = 0;
+    missionStartTime = performance.now();
+    missionCooldown = 0;
+    missionRings.forEach((r, i) => { r.visible = true; r.material.emissiveIntensity = i === 0 ? 5 : 1.5; });
+    if (missionHudEl) {
+        missionHudEl.textContent = `CHECKPOINT 1/${missionRings.length}`;
+        missionHudEl.classList.add('active');
+    }
+}
+
+function finishMission() {
+    missionActive = false;
+    const elapsed = (performance.now() - missionStartTime) / 1000;
+    if (missionHudEl) {
+        missionHudEl.textContent = `MISSION COMPLETE ${elapsed.toFixed(1)}s`;
+        missionHudEl.classList.add('active');
+    }
+    missionRings.forEach(r => { r.visible = false; });
+    missionCooldown = 3.5;
+}
+
+function updateMission(dt) {
+    if (!missionActive) {
+        if (missionCooldown > 0) {
+            missionCooldown -= dt;
+            if (missionCooldown <= 0 && missionHudEl) missionHudEl.classList.remove('active');
+        }
+        return;
+    }
+
+    const target = missionPoints[missionIndex];
+    const dist = carRoot.position.distanceTo(target);
+    if (dist < 8) {
+        missionIndex++;
+        if (missionIndex >= missionPoints.length) {
+            finishMission();
+            return;
+        }
+        missionRings.forEach((r, i) => { r.material.emissiveIntensity = i === missionIndex ? 5 : 1.5; });
+    }
+
+    if (missionHudEl) {
+        const elapsed = (performance.now() - missionStartTime) / 1000;
+        missionHudEl.textContent = `CHECKPOINT ${missionIndex + 1}/${missionRings.length} | ${elapsed.toFixed(1)}s`;
+    }
+}
+
+function togglePhotoMode() {
+    photoMode = !photoMode;
+    if (photoMode) {
+        photoYaw = Math.atan2(camera.position.x - carRoot.position.x, camera.position.z - carRoot.position.z);
+        photoPitch = 0.2;
+        if (photoModeEl) photoModeEl.classList.add('active');
+        hudEl.style.opacity = '0';
+    } else {
+        if (photoModeEl) photoModeEl.classList.remove('active');
+        hudEl.style.opacity = '1';
+    }
+}
+
+function updatePhotoControls(dt) {
+    if (!(mouseButtons & 2)) {
+        mouseDX = 0;
+        mouseDY = 0;
+    }
+    if (mouseButtons & 2) {
+        photoYaw += mouseDX * 0.0025;
+        photoPitch = THREE.MathUtils.clamp(photoPitch - mouseDY * 0.002, -0.3, 1.2);
+    }
+
+    const speedMul = keys['shift'] ? 2.2 : 1.0;
+    const forward = new THREE.Vector3(Math.sin(photoYaw), 0, Math.cos(photoYaw));
+    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    const move = new THREE.Vector3();
+
+    if (keys['w']) move.add(forward);
+    if (keys['s']) move.sub(forward);
+    if (keys['a']) move.sub(right);
+    if (keys['d']) move.add(right);
+    if (keys['q']) move.y -= 1;
+    if (keys['e']) move.y += 1;
+
+    if (move.lengthSq() > 0) {
+        move.normalize().multiplyScalar(photoSpeed * speedMul * dt);
+        camera.position.add(move);
+    }
+
+    const lookAt = new THREE.Vector3(
+        camera.position.x + Math.sin(photoYaw) * Math.cos(photoPitch),
+        camera.position.y + Math.sin(photoPitch),
+        camera.position.z + Math.cos(photoYaw) * Math.cos(photoPitch)
+    );
+    camera.lookAt(lookAt);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  HUD
 // ═══════════════════════════════════════════════════════════════
@@ -485,9 +957,12 @@ const speedCtx = speedCanvas.getContext('2d');
 const compassCtx = compassCanvas.getContext('2d');
 const gearEl = document.getElementById('gear-value');
 const coordsEl = document.getElementById('coords');
+const statusMiniEl = document.getElementById('status-mini');
 const boostFillEl = document.getElementById('boost-fill');
 const engineFillEl = document.getElementById('engine-fill');
 const nitroFlashEl = document.getElementById('nitro-flash');
+const missionHudEl = document.getElementById('mission-hud');
+const photoModeEl = document.getElementById('photo-mode');
 let engineTemp = 20;
 
 function drawSpeedometer(kmh) {
@@ -578,9 +1053,14 @@ function updateHUD(speed, yaw, pos) {
     gearEl.textContent = gear;
 
     coordsEl.textContent = `X:${pos.x.toFixed(0)} Z:${pos.z.toFixed(0)} Y:${pos.y.toFixed(1)}`;
+    if (statusMiniEl) {
+        const wLabel = weatherMode === 0 ? 'CLEAR' : weatherMode === 1 ? 'RAIN' : 'STORM';
+        const mLabel = missionActive ? 'ON' : 'OFF';
+        statusMiniEl.textContent = `WEATHER: ${wLabel} | MISSION: ${mLabel}`;
+    }
 
-    const throttle = keys['w'] || keys['arrowup'];
-    engineTemp = throttle ? Math.min(100, engineTemp + 12 * 0.016) : Math.max(20, engineTemp - 7 * 0.016);
+    const throttleActive = throttleInput > 0.1;
+    engineTemp = throttleActive ? Math.min(100, engineTemp + 12 * 0.016) : Math.max(20, engineTemp - 7 * 0.016);
     engineFillEl.style.width = engineTemp + '%';
     engineFillEl.style.background = engineTemp > 80
         ? 'linear-gradient(90deg,#ef4444,#ff2200)'
@@ -708,8 +1188,11 @@ function setProgress(pct, msg) {
 //  INIT
 // ═══════════════════════════════════════════════════════════════
 async function init() {
-    setProgress(5, 'BUILDING SCENE...');
+    setProgress(5, lowQuality ? 'FAST-LOAD MODE: BUILDING SCENE...' : 'BUILDING SCENE...');
     buildEnvironment();
+    setupWeather();
+    initMissions();
+    setWeatherMode(0);
 
     // ── DRACO loader for city (may be Draco-compressed)
     const draco = new DRACOLoader();
@@ -722,9 +1205,9 @@ async function init() {
     // Note: no DRACOLoader — avoids any decompression issues with textures
 
     // ════════════════════════════════════════════════════════════
-    // 1. LOAD HONG KONG CITY
+    // 1. LOAD MEGA CITY
     // ════════════════════════════════════════════════════════════
-    setProgress(10, 'LOADING HONG KONG CITY...');
+    setProgress(10, 'LOADING MEGA CITY...');
     try {
         const cityGltf = await new Promise((res, rej) => cityLoader.load(
             '/models/full_gameready_city_buildings_iv_hongkong.glb', res,
@@ -765,17 +1248,19 @@ async function init() {
 
         // ── Fix floating props: hide any mesh above 60 world units
         // Tightened footprint to remove "boundary" empty spaces in GLB
-        const cityFootprint = 145;
-        const maxHeight = 55;
+        const cityFootprint = lowQuality ? 130 : 145;
+        const maxHeight = lowQuality ? 50 : 55;
 
         // Spread tiles based on their dense footprint, not total raw bbox
         const offX = 130;
         const offZ = 130;
 
-        const offsets = [
-            { x: -offX, z: -offZ }, { x: offX, z: -offZ },
-            { x: -offX, z: offZ }, { x: offX, z: offZ }
-        ];
+        const offsets = lowQuality
+            ? [{ x: 0, z: 0 }]
+            : [
+                { x: -offX, z: -offZ }, { x: offX, z: -offZ },
+                { x: -offX, z: offZ }, { x: offX, z: offZ }
+            ];
 
         offsets.forEach((off, i) => {
             const tile = i === 0 ? city : city.clone();
@@ -801,7 +1286,7 @@ async function init() {
             });
         });
 
-        console.log(`HK Mega-City (4 Connected Tiles): ${collidables.length} collidables`);
+        console.log(`Mega City: ${collidables.length} collidables`);
         setProgress(62, 'CITY LOADED ✓');
 
     } catch (err) {
@@ -819,21 +1304,21 @@ async function init() {
         ));
         const roadModel = roadGltf.scene;
 
-        // Scale it to a manageable square size
+        // Perfect Square Tiling: force X and Z to exactly 100 units to eliminate gaps
         const rb = new THREE.Box3().setFromObject(roadModel);
         const rSize = rb.getSize(new THREE.Vector3());
-        let TILE_SCALE = 1.0;
-        if (rSize.x > 0.001 && rSize.z > 0.001) {
-            TILE_SCALE = 100 / Math.max(rSize.x, rSize.z);
-        }
+
+        let scaleX = 105 / (rSize.x || 1);
+        let scaleZ = 105 / (rSize.z || 1);
+
         // Squash the Y axis drastically to make the road completely flat and remove slopes
-        roadModel.scale.set(TILE_SCALE, 0.001, TILE_SCALE);
+        roadModel.scale.set(scaleX, 0.001, scaleZ);
 
         // Ensure its rotation is flat
         roadModel.rotation.set(0, 0, 0);
 
-        const TILE_DIM = 98; // larger tiles for better performance
-        const GRID_SIZE = 4; // 9x9 grid to cover ~800 units
+        const TILE_DIM = 100; // Step by 100, but scaled to 105 = 5 unit overlap to hide gaps
+        const GRID_SIZE = 4; // 9x9 grid to cover ~900 units
 
         // Dark base plane just in case of microscopic seams
         const baseGeo = new THREE.PlaneGeometry(1000, 1000);
@@ -858,6 +1343,8 @@ async function init() {
         const g = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), new THREE.MeshStandardMaterial({ color: 0x111111 }));
         g.rotation.x = -Math.PI / 2; g.position.y = -0.1; scene.add(g);
     }
+
+    initTraffic();
 
     // ════════════════════════════════════════════════════════════
     // 3. LOAD CAR (car.glb)
@@ -913,7 +1400,7 @@ async function init() {
 
         // ── Real-time environment reflection ─────────────────────
         // CubeRenderTarget: 128 for MAX speed and smooth loading
-        cubeRenderTarget = new THREE.WebGLCubeRenderTarget(128, {
+        cubeRenderTarget = new THREE.WebGLCubeRenderTarget(lowQuality ? 64 : 128, {
             type: THREE.HalfFloatType,
             generateMipmaps: true,
         });
@@ -984,6 +1471,13 @@ async function init() {
     glow.position.set(0, -0.15, 0);
     carRoot.add(glow);
 
+    // â”€â”€ Brake lights
+    brakeLightL = new THREE.PointLight(0xff3344, 0.6, 8, 2);
+    brakeLightR = new THREE.PointLight(0xff3344, 0.6, 8, 2);
+    brakeLightL.position.set(-0.6, 0.6, -2.2);
+    brakeLightR.position.set(0.6, 0.6, -2.2);
+    carRoot.add(brakeLightL, brakeLightR);
+
     // ── Show game
     setProgress(100, vehicleLoaded ? 'M3A1 READY — PRESS W TO DRIVE!' : 'BOX CAR READY — PRESS W TO DRIVE!');
     await new Promise(r => setTimeout(r, 600));
@@ -992,6 +1486,32 @@ async function init() {
     setTimeout(() => { loadingEl.style.display = 'none'; }, 800);
     hudEl.style.opacity = '1';
 
+    // Bruno Simon-inspired premium title text
+    const titleOverlay = document.createElement('div');
+    titleOverlay.id = 'premium-title';
+    titleOverlay.innerHTML = `
+        <div style="font-size: 4rem; font-weight: 900; letter-spacing: -2px; color: white; text-shadow: 0 4px 20px rgba(0,0,0,0.8); margin-bottom: -10px;">Jibin Jose</div>
+        <div style="font-size: 1.2rem; color: #00ffcc; letter-spacing: 4px; font-weight: 400; text-shadow: 0 0 10px rgba(0,255,204,0.5);">Software Engineer</div>
+        <div style="font-size: 0.7rem; color: rgba(255,255,255,0.4); letter-spacing: 2px; margin-top: 15px;">W,A,S,D TO NAVIGATE THE PORTFOLIO</div>
+    `;
+    titleOverlay.style.position = 'absolute';
+    titleOverlay.style.top = '10%';
+    titleOverlay.style.left = '50%';
+    titleOverlay.style.transform = 'translateX(-50%) translateY(30px)';
+    titleOverlay.style.textAlign = 'center';
+    titleOverlay.style.opacity = '0';
+    titleOverlay.style.transition = 'all 2s cubic-bezier(0.16, 1, 0.3, 1)';
+    titleOverlay.style.pointerEvents = 'none';
+    titleOverlay.style.zIndex = '5';
+    titleOverlay.style.fontFamily = "'Inter', 'Helvetica Neue', sans-serif";
+    document.getElementById('app').appendChild(titleOverlay);
+
+    setTimeout(() => {
+        titleOverlay.style.opacity = '1';
+        titleOverlay.style.transform = 'translateX(-50%) translateY(0px)';
+    }, 1500);
+
+    window.vehicleLoadedGlobal = true; // Signal for intro sweep
     animate();
 }
 
@@ -1184,6 +1704,8 @@ function animate() {
         updateHUD(carSpeed, carRoot.rotation.y, carRoot.position);
         updateAudio(carSpeed, false, true);
         updateParticles(dt, carRoot.position, carRoot.rotation.y, 25);
+        updateWeather(dt);
+        updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
         renderer.render(scene, camera);
         frameCount++;
@@ -1191,20 +1713,37 @@ function animate() {
     }
 
     // ── Read keys ──────────────────────────────────────────
-    const goFwd = keys['w'] || keys['arrowup'];
-    const goBack = keys['s'] || keys['arrowdown'];
-    const goLeft = keys['a'] || keys['arrowleft'];
-    const goRight = keys['d'] || keys['arrowright'];
-    const boosting = (keys['shift'] || keys['shiftleft']) && boostFuel > 0;
-    const handbrake = keys[' '];
+    pollGamepad();
 
-    // Camera switch (C, one-shot)
-    const cNow = keys['c'];
+    const kbFwd = keys['w'] || keys['arrowup'];
+    const kbBack = keys['s'] || keys['arrowdown'];
+    const kbLeft = keys['a'] || keys['arrowleft'];
+    const kbRight = keys['d'] || keys['arrowright'];
+
+    const mouseThrottle = (mouseButtons & 1) !== 0;
+    const mouseBrake = (mouseButtons & 2) !== 0;
+    if (!(mouseButtons & 1)) {
+        mouseSteer *= 0.9;
+    }
+
+    const steerInput = THREE.MathUtils.clamp(
+        (kbLeft ? 1 : 0) + (kbRight ? -1 : 0) + mouseSteer + touchState.steer + gamepadState.steer,
+        -1, 1
+    );
+
+    throttleInput = Math.max(kbFwd ? 1 : 0, mouseThrottle ? 1 : 0, touchState.throttle ? 1 : 0, gamepadState.throttle);
+    brakeInput = Math.max(kbBack ? 1 : 0, mouseBrake ? 1 : 0, touchState.brake ? 1 : 0, gamepadState.brake);
+
+    const boosting = (keys['shift'] || keys['shiftleft'] || touchState.boost || gamepadState.boost) && boostFuel > 0;
+    const handbrake = keys[' '] || touchState.handbrake || gamepadState.handbrake;
+
+    // Camera switch (C / Gamepad Y / Mobile Cam, one-shot)
+    const cNow = keys['c'] || touchState.camSwitch || gamepadState.camSwitch;
     if (cNow && !camSwitchedLastFrame) cameraMode = (cameraMode + 1) % 3;
     camSwitchedLastFrame = cNow;
 
-    // Reset (R, one-shot)
-    const rNow = keys['r'];
+    // Reset (R / Gamepad X / Mobile Reset, one-shot)
+    const rNow = keys['r'] || touchState.reset || gamepadState.reset;
     if (rNow && !resetPressedLastFrame) {
         carRoot.position.set(17, 0.1, 40);   // reset to the specified street point
         carRoot.rotation.set(0, Math.PI, 0); // rotated 180 deg to face buildings
@@ -1213,19 +1752,51 @@ function animate() {
         driftFactor = 0;
     }
     resetPressedLastFrame = rNow;
+    touchState.camSwitch = false;
+    touchState.reset = false;
+
+    const tNow = keys['t'] || touchState.weather;
+    if (tNow && !weatherPressedLastFrame) {
+        setWeatherMode((weatherMode + 1) % 3);
+    }
+    weatherPressedLastFrame = tNow;
+    touchState.weather = false;
+
+    const mNow = keys['m'] || touchState.mission;
+    if (mNow && !missionPressedLastFrame) {
+        if (!missionActive) startMission();
+    }
+    missionPressedLastFrame = mNow;
+    touchState.mission = false;
+
+    const pNow = keys['p'] || touchState.photo;
+    if (pNow && !photoPressedLastFrame) {
+        togglePhotoMode();
+    }
+    photoPressedLastFrame = pNow;
+    touchState.photo = false;
+
+    if (photoMode) {
+        updateWeather(dt);
+        updateTraffic(dt);
+        updatePhotoControls(dt);
+        mouseDX = 0; mouseDY = 0;
+        renderer.render(scene, camera);
+        return;
+    }
 
     // ── STEERING (FIXED: A=left, D=right from driver view) ───
     // Positive steer = CCW yaw = left turn from driver's perspective (camera behind)
-    const steerTarget = goLeft ? MAX_STEER : goRight ? -MAX_STEER : 0;
+    const steerTarget = steerInput * MAX_STEER;
     carSteer += (steerTarget - carSteer) * Math.min(dt * STEER_RATE, 1);
 
     // ── SPEED ──────────────────────────────────────────────
     const topSpd = boosting ? BOOST_SPEED : MAX_SPEED;
-    if (goFwd) {
-        carSpeed = Math.min(carSpeed + (boosting ? ACCEL * 1.8 : ACCEL) * dt, topSpd);
-    } else if (goBack) {
-        if (carSpeed > 0.5) carSpeed -= BRAKE_FORCE * dt;
-        else carSpeed = Math.max(carSpeed - REV_SPEED * dt, -REV_SPEED);
+    if (throttleInput > 0.05) {
+        carSpeed = Math.min(carSpeed + (boosting ? ACCEL * 1.8 : ACCEL) * throttleInput * dt, topSpd);
+    } else if (brakeInput > 0.05) {
+        if (carSpeed > 0.5) carSpeed -= BRAKE_FORCE * brakeInput * dt;
+        else carSpeed = Math.max(carSpeed - REV_SPEED * brakeInput * dt, -REV_SPEED);
     } else {
         carSpeed *= Math.pow(0.88, dt * 60); // natural friction
     }
@@ -1301,6 +1872,13 @@ function animate() {
     }
     boostFillEl.style.width = boostFuel + '%';
 
+    if (brakeLightL && brakeLightR) {
+        const brakeLevel = Math.max(brakeInput, carSpeed < -0.2 ? 1 : 0);
+        const intensity = 0.4 + brakeLevel * 2.2;
+        brakeLightL.intensity = intensity;
+        brakeLightR.intensity = intensity;
+    }
+
     // ── WHEEL SPIN (box car) ───────────────────────────────
     if (carWheels.length > 0) {
         const angV = carSpeed / 0.42;
@@ -1314,8 +1892,9 @@ function animate() {
     const driftLean = isDrifting ? carSteer * 0.12 : 0;
     carRoot.rotation.z = THREE.MathUtils.lerp(carRoot.rotation.z,
         carSteer * speedPct * 0.07 + driftLean, 0.12);
+    const accelTilt = throttleInput > 0.05 ? -1 : brakeInput > 0.05 ? 1 : 0;
     carRoot.rotation.x = THREE.MathUtils.lerp(carRoot.rotation.x,
-        (goFwd ? -1 : goBack ? 1 : 0) * speedPct * 0.028, 0.08);
+        accelTilt * speedPct * 0.028, 0.08);
 
     // ── ENGINE AUDIO ───────────────────────────────────────
     updateAudio(carSpeed, boosting, isDrifting);
@@ -1327,18 +1906,56 @@ function animate() {
 
     // ── Particles ──────────────────────────────────────────
     updateParticles(dt, carRoot.position, carRoot.rotation.y, carSpeed);
+    updateWeather(dt);
+    updateTraffic(dt);
     if (window.envSmoke) {
         window.envSmoke.rotation.y -= dt * 0.03; // Animate environmental smoke
     }
+    if (window.holoNodes) {
+        window.holoNodes.forEach((node, idx) => {
+            node.rotation.x += dt * 0.5;
+            node.rotation.y += dt * 0.8;
+            node.position.y += Math.sin(Date.now() * 0.002 + idx) * 0.02;
+        });
+    }
 
     // ── Camera ─────────────────────────────────────────────
-    updateCamera(dt);
+    const camTarget = carRoot.position.clone();
+    camTarget.y += 2.5;
+
+    // Cinematic Intro Sweep
+    if (!introSweepDone && window.vehicleLoadedGlobal) {
+        sweepTime += dt * 0.4;
+        const startPos = new THREE.Vector3(17, 80, 0); // High up and back
+        const endPos = new THREE.Vector3(17, 6, 54);   // Normal start position behind car
+
+        // Easing function (easeOutCubic)
+        const t = Math.min(sweepTime, 1);
+        const easeT = 1 - Math.pow(1 - t, 3);
+
+        camera.position.lerpVectors(startPos, endPos, easeT);
+
+        if (t >= 1) {
+            introSweepDone = true;
+            camPos.copy(camera.position); // hand over control
+        }
+    } else {
+        updateCamera(dt);
+    }
+
+    if (introSweepDone || window.vehicleLoadedGlobal) {
+        camera.lookAt(camTarget);
+    }
+
+    const targetFov = BASE_FOV + speedPct * 6 + (boosting ? 6 : 0);
+    camera.fov += (targetFov - camera.fov) * 0.08;
+    camera.updateProjectionMatrix();
 
     // ── FRAME COUNTER ───────────────────────────────────────
     frameCount++;
 
     // ── PRO REAL-TIME REFLECTIONS (Optimized: every 10 frames) ──
-    if (envCubeCamera && frameCount % 10 === 0) {
+    if (envCubeCamera && frameCount % REFLECT_EVERY === 0) {
         carRoot.visible = false;            // hide so car doesn't reflect itself
         envCubeCamera.position.copy(carRoot.position);
         envCubeCamera.position.y += 1;
@@ -1362,6 +1979,7 @@ function animate() {
 
     // ── RESUME SCAN LOGIC ──────────────────────────────────
     updateResumeLogic(dt);
+    updateMission(dt);
 
     mouseDX = 0; mouseDY = 0;
     renderer.render(scene, camera);
@@ -1485,6 +2103,7 @@ function initResumeMarkers() {
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 

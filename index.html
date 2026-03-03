@@ -28,6 +28,7 @@
 
     canvas {
       display: block;
+      touch-action: none;
     }
 
     /* HUD */
@@ -135,6 +136,17 @@
       text-align: right;
     }
 
+    #status-mini {
+      position: absolute;
+      top: 3.1rem;
+      right: 2rem;
+      font-size: 0.5rem;
+      color: rgba(255, 255, 255, 0.25);
+      letter-spacing: 0.18em;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
     /* Controls panel */
     #controls-panel {
       position: absolute;
@@ -178,6 +190,106 @@
       height: 1px;
       background: rgba(255, 255, 255, 0.05);
       margin: 2px 0;
+    }
+
+    /* Mobile controls */
+    #mobile-controls {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      pointer-events: none;
+      display: none;
+    }
+
+    #touch-joystick {
+      position: absolute;
+      left: 6vw;
+      bottom: 8vh;
+      width: 130px;
+      height: 130px;
+      pointer-events: all;
+      touch-action: none;
+    }
+
+    #touch-joystick .stick-base {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at center, rgba(0, 255, 204, 0.08), rgba(0, 255, 204, 0.02));
+      border: 1px solid rgba(0, 255, 204, 0.25);
+      backdrop-filter: blur(10px);
+    }
+
+    #touch-joystick .stick-knob {
+      position: absolute;
+      width: 56px;
+      height: 56px;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: rgba(0, 255, 204, 0.35);
+      box-shadow: 0 0 18px rgba(0, 255, 204, 0.4);
+      border: 1px solid rgba(0, 255, 204, 0.7);
+    }
+
+    #touch-buttons {
+      position: absolute;
+      right: 5vw;
+      bottom: 7vh;
+      display: grid;
+      grid-template-columns: 86px 86px;
+      grid-template-rows: 86px 86px;
+      gap: 12px;
+      pointer-events: all;
+      touch-action: none;
+    }
+
+    .touch-btn {
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      color: #00ffcc;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      font-weight: 700;
+      text-transform: uppercase;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+      user-select: none;
+    }
+
+    .touch-btn.active {
+      background: rgba(0, 255, 204, 0.15);
+      border-color: rgba(0, 255, 204, 0.6);
+      box-shadow: 0 0 18px rgba(0, 255, 204, 0.35);
+    }
+
+    #touch-aux {
+      position: absolute;
+      right: 5vw;
+      top: 18vh;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: all;
+    }
+
+    #touch-aux .touch-btn {
+      width: 110px;
+      height: 44px;
+      border-radius: 14px;
+      font-size: 0.55rem;
+    }
+
+    @media (max-width: 900px) {
+      #controls-panel {
+        display: none;
+      }
+
+      #mobile-controls {
+        display: block;
+      }
     }
 
     /* Mini compass */
@@ -555,6 +667,61 @@
         border-color: rgba(0, 255, 204, 0.4);
       }
     }
+
+    /* Mission HUD */
+    #mission-hud {
+      position: fixed;
+      top: 6.4rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(0, 255, 204, 0.2);
+      padding: 0.5rem 1.2rem;
+      border-radius: 999px;
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      color: #00ffcc;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      text-transform: uppercase;
+    }
+
+    #mission-hud.active {
+      opacity: 1;
+    }
+
+    /* Photo mode */
+    #photo-mode {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+
+    #photo-mode.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    #photo-hint {
+      position: absolute;
+      top: 6vh;
+      right: 6vw;
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 0.6rem 1rem;
+      border-radius: 10px;
+      font-size: 0.55rem;
+      letter-spacing: 0.2em;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+    }
   </style>
 </head>
 
@@ -617,6 +784,7 @@
           <div id="model-name">M3A1 SCOUT CAR // RECON</div>
         </div>
         <div id="coords">X: 0.0 | Z: 0.0 | Y: 0.0</div>
+        <div id="status-mini">WEATHER: CLEAR | MISSION: OFF</div>
       </div>
 
       <!-- Status bars -->
@@ -654,6 +822,14 @@
         <div class="ctrl-divider"></div>
         <div class="ctrl-row"><span class="key">R</span><span class="ctrl-desc">RESET POSITION</span></div>
         <div class="ctrl-row"><span class="key">C</span><span class="ctrl-desc">CAMERA MODE</span></div>
+        <div class="ctrl-row"><span class="key">T</span><span class="ctrl-desc">WEATHER</span></div>
+        <div class="ctrl-row"><span class="key">M</span><span class="ctrl-desc">MISSION START</span></div>
+        <div class="ctrl-row"><span class="key">P</span><span class="ctrl-desc">PHOTO MODE</span></div>
+        <div class="ctrl-divider"></div>
+        <div class="ctrl-row"><span class="key">MOUSE</span><span class="ctrl-desc">HOLD LMB = GO / DRAG = STEER</span></div>
+        <div class="ctrl-row"><span class="key">PAD</span><span class="ctrl-desc">LS STEER | RT GO | LT BRAKE</span></div>
+        <div class="ctrl-row"><span class="key">A/B</span><span class="ctrl-desc">DRIFT / BOOST</span></div>
+        <div class="ctrl-row"><span class="key">[ ]</span><span class="ctrl-desc">MOUSE STEER SENS</span></div>
       </div>
 
       <!-- Gear box -->
@@ -670,6 +846,35 @@
           <div id="speed-unit">KM/H</div>
         </div>
       </div>
+    </div>
+
+    <!-- Mission HUD -->
+    <div id="mission-hud">MISSION READY</div>
+
+    <!-- Mobile controls -->
+    <div id="mobile-controls">
+      <div id="touch-joystick">
+        <div class="stick-base"></div>
+        <div class="stick-knob"></div>
+      </div>
+      <div id="touch-buttons">
+        <button class="touch-btn" id="touch-accel">GO</button>
+        <button class="touch-btn" id="touch-brake">BRAKE</button>
+        <button class="touch-btn" id="touch-drift">DRIFT</button>
+        <button class="touch-btn" id="touch-boost">BOOST</button>
+      </div>
+      <div id="touch-aux">
+        <button class="touch-btn" id="touch-camera">CAM</button>
+        <button class="touch-btn" id="touch-reset">RESET</button>
+        <button class="touch-btn" id="touch-weather">WEATHER</button>
+        <button class="touch-btn" id="touch-mission">MISSION</button>
+        <button class="touch-btn" id="touch-photo">PHOTO</button>
+      </div>
+    </div>
+
+    <!-- Photo mode overlay -->
+    <div id="photo-mode">
+      <div id="photo-hint">PHOTO MODE | RMB LOOK | WASD MOVE | Q/E UP/DOWN | P EXIT</div>
     </div>
   </div>
 

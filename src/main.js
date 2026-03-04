@@ -10,11 +10,14 @@ const MAX_PIXEL_RATIO = lowQuality ? 1.25 : 2;
 const REFLECT_EVERY = lowQuality ? 20 : 10;
 const BASE_FOG_DENSITY = 0.003;
 let mouseSteerSensitivity = 0.012;
+const USE_VIDEO_BACKGROUND = true;
+const CAR_BODY_COLOR = 0xffd400;
+const SHOW_NAME_IN_SPEEDOMETER = true;
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER
 // ═══════════════════════════════════════════════════════════════
-const renderer = new THREE.WebGLRenderer({ antialias: !lowQuality, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: !lowQuality, preserveDrawingBuffer: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = !lowQuality;
@@ -22,6 +25,7 @@ renderer.shadowMap.type = lowQuality ? THREE.BasicShadowMap : THREE.PCFSoftShado
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.4; // Pro exposure for vibrant neons
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+if (USE_VIDEO_BACKGROUND) renderer.setClearColor(0x000000, 0);
 document.getElementById('app').prepend(renderer.domElement);
 
 // Add global styles for the "Accident" flash effect
@@ -278,6 +282,9 @@ let hudHidden = false;
 let pickupMeshes = [];
 let pickupCollected = 0;
 let pickupTotal = 0;
+let speedCameras = [];
+let speedFines = 0;
+let eventTimer = 0;
 
 // Velocity vector for drift simulation
 const carVel = new THREE.Vector3();
@@ -538,7 +545,7 @@ const driftIndicatorEl = document.getElementById('drift-indicator');
 function buildBoxCar() {
     const g = new THREE.Group();
 
-    const green = new THREE.MeshStandardMaterial({ color: 0x3d6b3d, roughness: 0.5, metalness: 0.4 });
+    const green = new THREE.MeshStandardMaterial({ color: CAR_BODY_COLOR, roughness: 0.45, metalness: 0.7 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1a2b1a, roughness: 0.8 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x88ccff, transparent: true, opacity: 0.5, roughness: 0.1 });
     const rubber = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 });
@@ -591,7 +598,11 @@ function buildBoxCar() {
 function buildEnvironment() {
 
     // Deep night sky
-    scene.background = new THREE.Color(0x050810);
+    if (!USE_VIDEO_BACKGROUND) {
+        scene.background = new THREE.Color(0x050810);
+    } else {
+        scene.background = null;
+    }
 
     // Dense night fog — clear enough to see buildings, thick enough for atmosphere
     scene.fog = new THREE.FogExp2(0x060912, BASE_FOG_DENSITY);
@@ -815,7 +826,7 @@ function setWeatherMode(mode) {
 function setTimeOfDay(mode) {
     timeOfDay = mode;
     if (timeOfDay === 0) {
-        scene.background = new THREE.Color(0x050810);
+        if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(0x050810);
         if (scene.fog) scene.fog.color = new THREE.Color(0x060912);
         if (envAmbient) envAmbient.intensity = 3.8;
         if (envMoon) envMoon.intensity = 3.2;
@@ -826,7 +837,7 @@ function setTimeOfDay(mode) {
         }
         envNeonLights.forEach(l => { l.intensity = lowQuality ? 3.2 : 4.5; });
     } else {
-        scene.background = new THREE.Color(0x9bb7d6);
+        if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(0x9bb7d6);
         if (scene.fog) scene.fog.color = new THREE.Color(0xb4c7df);
         if (envAmbient) envAmbient.intensity = 2.2;
         if (envMoon) envMoon.intensity = 1.2;
@@ -963,6 +974,54 @@ function updatePickups(dt) {
             core.visible = false;
             pickupCollected += 1;
             if (pickupValueEl) pickupValueEl.textContent = `${pickupCollected} / ${pickupTotal}`;
+        }
+    });
+}
+
+function initSpeedCameras() {
+    const camPos = [
+        new THREE.Vector3(60, 0.2, 60),
+        new THREE.Vector3(-70, 0.2, 90),
+        new THREE.Vector3(-110, 0.2, -30),
+        new THREE.Vector3(120, 0.2, -80),
+        new THREE.Vector3(0, 0.2, -140)
+    ];
+    speedCameras = camPos.map(p => ({
+        pos: p,
+        radius: 10,
+        limit: 80,
+        cooldown: 6,
+        last: -999
+    }));
+    speedFines = 0;
+    if (fineValueEl) fineValueEl.textContent = `${speedFines}`;
+}
+
+function showEvent(msg, color) {
+    if (!eventHudEl) return;
+    eventHudEl.textContent = msg;
+    eventHudEl.style.color = color || '#ff6666';
+    eventHudEl.classList.add('active');
+    eventTimer = 1.6;
+}
+
+function updateSpeedCameras(dt, speed) {
+    if (speedCameras.length === 0) return;
+    const kmh = Math.abs(speed) * 3.6;
+    speedCameras.forEach(cam => {
+        cam.last += dt;
+        if (cam.last < cam.cooldown) return;
+        const d = carRoot.position.distanceTo(cam.pos);
+        if (d < cam.radius) {
+            cam.last = 0;
+            if (kmh > cam.limit) {
+                speedFines += 1;
+                if (fineValueEl) fineValueEl.textContent = `${speedFines}`;
+                showEvent(`SPEED CAMERA | ${Math.round(kmh)} KM/H`, '#ff6666');
+                if (audioCtx) playGearShiftSound('down');
+            } else {
+                showEvent('SPEED CAMERA CLEARED', '#66ff99');
+            }
         }
     });
 }
@@ -1164,9 +1223,11 @@ const boostFillEl = document.getElementById('boost-fill');
 const engineFillEl = document.getElementById('engine-fill');
 const nitroFlashEl = document.getElementById('nitro-flash');
 const missionHudEl = document.getElementById('mission-hud');
+const eventHudEl = document.getElementById('event-hud');
 const photoModeEl = document.getElementById('photo-mode');
 const driftScoreEl = document.getElementById('drift-score-value');
 const pickupValueEl = document.getElementById('pickup-value');
+const fineValueEl = document.getElementById('fine-value');
 let engineTemp = 20;
 
 function drawSpeedometer(kmh) {
@@ -1243,7 +1304,13 @@ function updateHUD(speed, yaw, pos) {
     drawSpeedometer(kmh);
     drawCompass(yaw);
 
-    document.getElementById('speed-value').textContent = Math.round(kmh);
+    if (SHOW_NAME_IN_SPEEDOMETER) {
+        document.getElementById('speed-value').textContent = 'JIBIN';
+        document.getElementById('speed-unit').textContent = 'JOSE';
+    } else {
+        document.getElementById('speed-value').textContent = Math.round(kmh);
+        document.getElementById('speed-unit').textContent = 'KM/H';
+    }
 
     let gear = 'N';
     if (speed > 0.5) {
@@ -1393,6 +1460,14 @@ function setProgress(pct, msg) {
     loadStatEl.textContent = msg;
 }
 
+function applyCarPaint(material) {
+    if (!material || !material.color) return;
+    if (material.transparent || material.opacity < 0.95) return;
+    if (material.name && /glass|window|light|rim|tire|rubber|chrome/i.test(material.name)) return;
+    material.color.setHex(CAR_BODY_COLOR);
+}
+
+
 // ═══════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════
@@ -1403,6 +1478,7 @@ async function init() {
     initMissions();
     initDriftSmoke();
     initPickups();
+    initSpeedCameras();
     setWeatherMode(0);
     setTimeOfDay(0);
 
@@ -1594,6 +1670,7 @@ async function init() {
                 // --- PRO ULTRA REFLECTIVE PAINT ---
                 m.metalness = 1.0;
                 m.roughness = 0.02;
+                applyCarPaint(m);
                 m.needsUpdate = true;
             });
         });
@@ -1691,7 +1768,7 @@ async function init() {
     carRoot.add(brakeLightL, brakeLightR);
 
     // ── Show game
-    setProgress(100, vehicleLoaded ? 'M3A1 READY — PRESS W TO DRIVE!' : 'BOX CAR READY — PRESS W TO DRIVE!');
+    setProgress(100, vehicleLoaded ? 'JIBIN JOSE READY — PRESS W TO EXPLORE!' : 'SCENE READY — PRESS W TO EXPLORE!');
     await new Promise(r => setTimeout(r, 600));
     loadingEl.style.transition = 'opacity 0.8s';
     loadingEl.style.opacity = '0';
@@ -2020,6 +2097,7 @@ function animate() {
         updateWeather(dt);
         updateTraffic(dt);
         updatePickups(dt);
+        updateSpeedCameras(dt, carSpeed);
         updatePhotoControls(dt);
         updateSpeedLines(0, false, dt);
         mouseDX = 0; mouseDY = 0;
@@ -2168,6 +2246,7 @@ function animate() {
     updateWeather(dt);
     updateTraffic(dt);
     updatePickups(dt);
+    updateSpeedCameras(dt, carSpeed);
     if (window.envSmoke) {
         window.envSmoke.rotation.y -= dt * 0.03; // Animate environmental smoke
     }
@@ -2248,6 +2327,10 @@ function animate() {
     // ── RESUME SCAN LOGIC ──────────────────────────────────
     updateResumeLogic(dt);
     updateMission(dt);
+    if (eventTimer > 0) {
+        eventTimer -= dt;
+        if (eventTimer <= 0 && eventHudEl) eventHudEl.classList.remove('active');
+    }
 
     mouseDX = 0; mouseDY = 0;
     renderer.render(scene, camera);
@@ -2291,7 +2374,7 @@ function updateResumeLogic(dt) {
         } else {
             // Near but not scanning
             promptEl.classList.add('active');
-            promptEl.textContent = `APPROACH [${closestSection.data.title}] FOR RECON`;
+            promptEl.textContent = `APPROACH [${closestSection.data.title}] TO VIEW`;
             if (currentActiveResume) {
                 containerEl.classList.remove('active');
                 currentActiveResume = null;

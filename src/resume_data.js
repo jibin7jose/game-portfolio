@@ -1,22 +1,22 @@
 export const resumeData = [
     {
         id: "experience",
-        title: "WORK EXPERIENCE",
+        title: "EXPERIENCE",
         position: { x: -180, z: -180 },
         content: `
             <h3>Full Stack Development Intern</h3>
             <p><strong>Edu-versity (Remote) | Mar 2025 – Jun 2025</strong></p>
             <ul>
-                <li>Participated in a hands-on full stack web development internship.</li>
-                <li>Developed and tested web applications using MongoDB, Express.js, React, and Node.js.</li>
-                <li>Gained experience in building real-time features and working in collaborative environments.</li>
+                <li>Built responsive web apps with MERN, focusing on smooth UX flows.</li>
+                <li>Implemented realtime UI updates and API integrations.</li>
+                <li>Collaborated in sprints with design and QA feedback loops.</li>
             </ul>
             <br>
-            <h3>Junior Software Developer trainee</h3>
-            <p><strong>MDigitz (Onsite) | July 30, 2025 – Oct 28, 2025</strong></p>
+            <h3>Junior Software Developer Trainee</h3>
+            <p><strong>MDigitz (Onsite) | Jul 2025 – Oct 2025</strong></p>
             <ul>
-                <li>Trained in full stack web development using Laravel, PHP, MySQL, and JavaScript.</li>
-                <li>Developed and maintained dynamic web applications using Laravel backend and RESTful architecture.</li>
+                <li>Developed Laravel applications with secure REST APIs.</li>
+                <li>Shipped dashboards and admin tools with performance improvements.</li>
             </ul>
             <br>
             <h3>Software Engineer</h3>
@@ -24,29 +24,28 @@ export const resumeData = [
             <ul>
                 <li>Building mobile and web apps using React Native, Next.js, and NestJS.</li>
                 <li>Developing backend APIs with Prisma and PostgreSQL.</li>
-                <li>Managing file storage with AWS S3 and EC2 hosting.</li>
+                <li>Exploring Three.js for 3D portfolio and product demos.</li>
             </ul>
         `
     },
     {
         id: "skills",
-        title: "SKILLS & INTERESTS",
+        title: "SKILLS & FOCUS",
         position: { x: 180, z: -180 },
         content: `
-            <p><strong>Programming Languages:</strong> C++, Java, JavaScript, TypeScript</p>
-            <p><strong>Frontend:</strong> HTML5, CSS3, React.js, Next.js, React Native, Tailwind CSS</p>
+            <p><strong>Core:</strong> JavaScript, TypeScript, React, Next.js, React Native</p>
+            <p><strong>3D:</strong> Three.js, WebGL, GSAP animations</p>
             <p><strong>Backend:</strong> NestJS, Node.js, PHP, Laravel</p>
-            <p><strong>Databases:</strong> PostgreSQL, MySQL, SQLite</p>
-            <p><strong>Tools:</strong> Prisma, phpMyAdmin, Figma, Git, GitHub</p>
-            <p><strong>Cloud:</strong> AWS (EC2, RDS, S3)</p>
+            <p><strong>Data:</strong> PostgreSQL, MySQL, SQLite, Prisma</p>
+            <p><strong>Tools:</strong> Figma, Git, GitHub, AWS (EC2, S3)</p>
         `
     },
     {
         id: "portfolio",
-        title: "PORTFOLIO",
+        title: "PORTFOLIO & LINKS",
         position: { x: -180, z: 180 },
         content: `
-            <p>Check out my portfolio for more projects and interactive experiences:</p>
+            <p>Explore my work and interactive 3D experiments:</p>
             <p><a href="https://portfolio-pi-cyan-64.vercel.app" target="_blank" style="color: #00ffcc;">portfolio-pi-cyan-64.vercel.app</a></p>
             <p>LinkedIn: <a href="https://www.linkedin.com/in/jibin--jose" target="_blank" style="color: #00ffcc;">linkedin.com/in/jibin--jose</a></p>
             <p>GitHub: <a href="https://github.com/jibin7jose" target="_blank" style="color: #00ffcc;">github.com/jibin7jose</a></p>
@@ -54,32 +53,32 @@ export const resumeData = [
     },
     {
         id: "personal",
-        title: "PERSONAL DETAILS",
+        title: "ABOUT JIBIN",
         position: { x: 180, z: 180 },
         content: `
             <p><strong>Name:</strong> JIBIN JOSE</p>
-            <p><strong>Location:</strong> Vazhakulam, Muvattupuzha, India</p>
+            <p><strong>Location:</strong> Vazhakulam, Muvattupuzha, Kerala</p>
             <p><strong>Phone:</strong> +91-7994279661</p>
             <p><strong>Email:</strong> <a href="mailto:jibinjose884@gmail.com" style="color: #00ffcc;">jibinjose884@gmail.com</a></p>
-            <p><strong>Objective:</strong> Frontend Developer skilled in React.js and UI/UX Design, passionate about interactive web apps and game development.</p>
+            <p><strong>Focus:</strong> Building immersive web experiences with 3D, motion, and clean UX systems.</p>
         `
     },
     {
         id: "projects",
-        title: "PROJECTS",
+        title: "SELECTED PROJECTS",
         position: { x: -80, z: 80 },
         content: `
             <h3>OUTBREAK FPS GAME</h3>
-            <p>An FPS game built with Unreal Engine where players experience action through the eyes of the protagonist.</p>
+            <p>An Unreal Engine FPS prototype with atmosphere-first gameplay and cinematic pacing.</p>
             <br>
             <h3>SOLIDSERVE</h3>
             <ul>
-                <li>Developed a CRUD-based web application for Akshaya centers in Kerala.</li>
-                <li>Implemented invoice generation, wallet management, and real-time transaction monitoring.</li>
+                <li>Built a CRUD web app for Akshaya centers in Kerala.</li>
+                <li>Implemented invoice generation, wallet management, and realtime monitoring.</li>
             </ul>
             <br>
             <h3>Belmountie Furniture</h3>
-            <p>E-commerce website with product listings, filters, and admin dashboard.</p>
+            <p>E-commerce site with product listings, filters, and admin dashboard.</p>
         `
     },
     {
@@ -104,8 +103,8 @@ export const resumeData = [
         `
     },
     {
-        id: "responsibility",
-        title: "RESPONSIBILITY",
+        id: "community",
+        title: "COMMUNITY",
         position: { x: 80, z: -80 },
         content: `
             <p><strong>NSS Volunteer:</strong> Coordinated community service events focused on health and education.</p>

@@ -4,9 +4,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>M3A1 Scout Car — Three.js</title>
-  <meta name="description" content="M3A1 Scout Car interactive 3D driving experience built with Three.js" />
+  <title>Jibin Jose — 3D Portfolio</title>
+  <meta name="description" content="Jibin Jose 3D portfolio landing page built with Three.js" />
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Oxanium:wght@300;400;600;700&family=Staatliches&display=swap');
     * {
       margin: 0;
       padding: 0;
@@ -14,10 +15,10 @@
     }
 
     body {
-      background: #0a0e1a;
+      background: #05070d;
       overflow: hidden;
-      font-family: 'JetBrains Mono', 'Courier New', monospace;
-      color: white;
+      font-family: 'Oxanium', 'JetBrains Mono', monospace;
+      color: #f4fbff;
     }
 
     #app {
@@ -26,10 +27,42 @@
       position: relative;
     }
 
+    #bg-video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+      filter: saturate(1.1) contrast(1.05);
+    }
+
+    #bg-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(10, 16, 28, 0.45), rgba(5, 7, 13, 0.85) 65%);
+      z-index: 1;
+      pointer-events: none;
+    }
+
     canvas {
       display: block;
       touch-action: none;
+      position: relative;
+      z-index: 2;
     }
+
+    :root {
+      --accent: #16f1d5;
+      --accent-2: #ff9a3c;
+      --accent-3: #34b7ff;
+      --ink: #f4fbff;
+      --ink-dim: rgba(244, 251, 255, 0.72);
+      --panel: rgba(6, 10, 20, 0.7);
+      --panel-strong: rgba(6, 10, 20, 0.88);
+      --glow: 0 0 40px rgba(22, 241, 213, 0.35);
+    }
+
 
     /* HUD */
     #hud {
@@ -95,6 +128,31 @@
       font-size: 1rem;
       color: #66ff99;
       text-shadow: 0 0 12px rgba(102, 255, 153, 0.5);
+      letter-spacing: 0.12em;
+    }
+
+    #fine-counter {
+      position: absolute;
+      bottom: 23.5rem;
+      right: 2.5rem;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.6rem;
+      letter-spacing: 0.18em;
+      color: rgba(255, 255, 255, 0.6);
+      text-transform: uppercase;
+      text-align: right;
+      min-width: 140px;
+    }
+
+    #fine-counter .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1rem;
+      color: #ff6666;
+      text-shadow: 0 0 12px rgba(255, 102, 102, 0.5);
       letter-spacing: 0.12em;
     }
 
@@ -404,20 +462,22 @@
       position: fixed;
       inset: 0;
       z-index: 100;
-      background: #050810;
+      background: radial-gradient(circle at 30% 20%, rgba(10, 18, 34, 0.65), rgba(5, 7, 13, 0.92) 70%);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 2rem;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
     }
 
     #loading-title {
-      font-size: 2.5rem;
+      font-size: 2.2rem;
       font-weight: 700;
       letter-spacing: 0.25em;
-      color: #00ffcc;
-      text-shadow: 0 0 40px #00ffcc70;
+      color: var(--accent);
+      text-shadow: 0 0 40px rgba(22, 241, 213, 0.6);
     }
 
     #loading-sub {
@@ -436,16 +496,48 @@
     #loading-bar-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #00ffcc, #00bbff);
+      background: linear-gradient(90deg, var(--accent), var(--accent-3));
       border-radius: 1px;
       transition: width 0.3s;
-      box-shadow: 0 0 10px #00ffcc;
+      box-shadow: 0 0 10px rgba(22, 241, 213, 0.6);
     }
 
     #loading-status {
       font-size: 0.5rem;
       color: rgba(255, 255, 255, 0.2);
       letter-spacing: 0.2em;
+    }
+
+    .loading-orb {
+      position: absolute;
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      border: 1px solid rgba(22, 241, 213, 0.25);
+      box-shadow: 0 0 80px rgba(22, 241, 213, 0.2), inset 0 0 60px rgba(22, 241, 213, 0.15);
+      animation: orbSpin 8s linear infinite;
+      pointer-events: none;
+    }
+
+    .loading-orb::before,
+    .loading-orb::after {
+      content: "";
+      position: absolute;
+      inset: 18px;
+      border-radius: 50%;
+      border: 1px dashed rgba(52, 183, 255, 0.3);
+      animation: orbSpin 6s linear infinite reverse;
+    }
+
+    .loading-orb::after {
+      inset: 46px;
+      border-color: rgba(255, 154, 60, 0.25);
+      animation-duration: 10s;
+    }
+
+    @keyframes orbSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
 
     /* Sound toggle — premium pill button */
@@ -742,6 +834,29 @@
       opacity: 1;
     }
 
+    #event-hud {
+      position: fixed;
+      top: 9rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0.5rem 1.2rem;
+      border-radius: 999px;
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      color: #ff6666;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+      text-transform: uppercase;
+    }
+
+    #event-hud.active {
+      opacity: 1;
+    }
+
     /* Photo mode */
     #photo-mode {
       position: fixed;
@@ -777,15 +892,21 @@
 
 <body>
   <div id="app">
+    <video id="bg-video" autoplay muted loop playsinline poster="/models/bmw.jpg">
+      <source src="/models/car.mp4" type="video/mp4" />
+    </video>
+    <div id="bg-overlay"></div>
     <!-- Loading -->
     <div id="loading">
-      <div id="loading-title">⚙ SCOUT RECON</div>
-      <div id="loading-sub">M3A1 SCOUT CAR // TACTICAL DRIVE</div>
+      <div class="loading-orb"></div>
+      <div id="loading-title">⚙ JIBIN JOSE</div>
+      <div id="loading-sub">3D PORTFOLIO // REALTIME SCENE</div>
       <div id="loading-bar-track">
         <div id="loading-bar-fill"></div>
       </div>
-      <div id="loading-status">INITIALIZING ENGINE...</div>
+      <div id="loading-status">LOADING 3D ENVIRONMENT...</div>
     </div>
+
 
     <!-- Nitro flash -->
     <div id="nitro-flash"></div>
@@ -812,11 +933,11 @@
 
     <!-- Resume UI Elements -->
     <div id="resume-overlay">
-      <div id="resume-prompt">READY TO RECON — DRIVE NEAR TO VIEW</div>
+      <div id="resume-prompt">APPROACH TO UNLOCK PROFILE NODES</div>
       <div id="resume-container">
         <div id="resume-header">
           <div id="resume-title">SECTION TITLE</div>
-          <div style="font-size: 0.45rem; color: rgba(255,255,255,0.3); letter-spacing: 0.1em;">RECON DATA // CORE</div>
+          <div style="font-size: 0.45rem; color: rgba(255,255,255,0.3); letter-spacing: 0.1em;">PROFILE DATA // CORE</div>
         </div>
         <div id="resume-content">
           Loading data...
@@ -830,8 +951,8 @@
       <!-- Top bar -->
       <div id="topbar">
         <div>
-          <div id="brand">⚙ SCOUT.EXE</div>
-          <div id="model-name">M3A1 SCOUT CAR // RECON</div>
+          <div id="brand">⚙ JIBIN.EXE</div>
+          <div id="model-name">3D PORTFOLIO // LIVE SCENE</div>
         </div>
         <div id="coords">X: 0.0 | Z: 0.0 | Y: 0.0</div>
         <div id="status-mini">WEATHER: CLEAR | MISSION: OFF</div>
@@ -908,13 +1029,20 @@
 
       <!-- Pickups -->
       <div id="pickup-counter">
-        RECON CORES
+        PROFILE NODES
         <span class="value" id="pickup-value">0 / 0</span>
+      </div>
+
+      <!-- Speed fines -->
+      <div id="fine-counter">
+        SPEED FINES
+        <span class="value" id="fine-value">0</span>
       </div>
     </div>
 
     <!-- Mission HUD -->
     <div id="mission-hud">MISSION READY</div>
+    <div id="event-hud">SPEED CAMERA</div>
 
     <!-- Mobile controls -->
     <div id="mobile-controls">

@@ -855,7 +855,7 @@ function setTimeOfDay(mode) {
             envHemi.intensity = 0.7;
         }
         envNeonLights.forEach(l => { l.intensity = lowQuality ? 3.2 : 4.5; });
-    } else {
+    } else if (cameraMode === 2) {
         if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(0x9bb7d6);
         if (scene.fog) scene.fog.color = new THREE.Color(0xb4c7df);
         if (envAmbient) envAmbient.intensity = 2.2;
@@ -1515,7 +1515,7 @@ function updateCamera(dt) {
         camera.position.set(pos.x + sy * 0.2, pos.y + 1.8, pos.z + cy * 0.2);
         camera.lookAt(pos.x + sy * 20, pos.y + 1.6, pos.z + cy * 20);
 
-    } else {
+    } else if (cameraMode === 2) {
         // Orbit — right-click drag
         if (mouseDX !== 0 || mouseDY !== 0) {
             camYaw += mouseDX * 0.004;
@@ -1895,7 +1895,6 @@ async function init() {
     scene.add(carRoot);
     carRoot.position.set(17, 0.1, 40);
     carRoot.rotation.y = Math.PI;
-    initUnderglow();
 
     // Init camPos behind car
     const sy0 = Math.sin(carRoot.rotation.y), cy0 = Math.cos(carRoot.rotation.y);
@@ -2659,3 +2658,5 @@ window.addEventListener('resize', () => {
 
 initResumeMarkers();
 init();
+
+

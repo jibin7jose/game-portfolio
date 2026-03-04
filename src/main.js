@@ -366,6 +366,7 @@ let glowPressedLastFrame = false;
 let autoTime = false;
 let autoTimePressedLastFrame = false;
 let autoTimePhase = 0;
+const AUTO_TIME_CYCLE_SECONDS = 60;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -1276,7 +1277,7 @@ function updateBoostPads(dt) {
 
 function updateAutoTime(dt) {
     if (!autoTime) return;
-    autoTimePhase += dt * 0.03;
+    autoTimePhase += dt / AUTO_TIME_CYCLE_SECONDS;
     const t = (Math.sin(autoTimePhase * Math.PI * 2) + 1) * 0.5;
 
     const fogNight = new THREE.Color(0x060912);

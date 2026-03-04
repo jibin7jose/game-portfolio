@@ -315,6 +315,8 @@ let trailPositions = null;
 let trailIndex = 0;
 let underglow = null;
 let underglowOn = true;
+let boostShockwaves = [];
+let boostingLastFrame = false;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -1206,6 +1208,43 @@ function updateUnderglow(dt, boosting) {
     underglow.material.color.setHSL(hue, 0.8, 0.5);
     underglow.scale.setScalar(1 + speed * 0.25);
     underglow.material.needsUpdate = true;
+}
+
+function spawnBoostShockwave() {
+    const geo = new THREE.RingGeometry(1.6, 2.4, 56);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x66ccff,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(carRoot.position);
+    ring.position.y += 0.12;
+    ring.userData.life = 0;
+    scene.add(ring);
+    boostShockwaves.push(ring);
+}
+
+function updateBoostShockwaves(dt) {
+    if (boostShockwaves.length === 0) return;
+    for (let i = boostShockwaves.length - 1; i >= 0; i--) {
+        const ring = boostShockwaves[i];
+        ring.userData.life += dt;
+        const t = ring.userData.life / 0.8;
+        if (t >= 1) {
+            scene.remove(ring);
+            ring.geometry.dispose();
+            ring.material.dispose();
+            boostShockwaves.splice(i, 1);
+            continue;
+        }
+        const scale = 1 + t * 12;
+        ring.scale.setScalar(scale);
+        ring.material.opacity = 0.85 * (1 - t);
+    }
 }
 
 function initDriftSmoke() {
@@ -2120,6 +2159,7 @@ function animate() {
         updateTrail(dt);
         updateFollowSpot();
         updateUnderglow(dt, false);
+        updateBoostShockwaves(dt);
         updateWeather(dt);
         updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
@@ -2202,6 +2242,11 @@ function animate() {
         brakeInput = 0;
         boosting = Math.sin(demoTime * 0.45) > 0.7 && boostFuel > 0;
     }
+
+    if (boosting && !boostingLastFrame) {
+        spawnBoostShockwave();
+    }
+    boostingLastFrame = boosting;
 
     const tNow = keys['t'] || touchState.weather;
     if (tNow && !weatherPressedLastFrame) {
@@ -2396,6 +2441,7 @@ function animate() {
     updateTrail(dt);
     updateFollowSpot();
     updateUnderglow(dt, boosting);
+    updateBoostShockwaves(dt);
     updateWeather(dt);
     updateTraffic(dt);
     updatePickups(dt);

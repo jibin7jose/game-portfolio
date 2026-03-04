@@ -305,11 +305,14 @@ let brakeLightR = null;
 const lastSafePos = new THREE.Vector3(17, 0.1, 40);
 const _cvTmp = new THREE.Vector3();
 
-let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit
+let cameraMode = 0;   // 0=chase  1=cockpit  2=orbit  3=drone
 let camYaw = 0;
 let camPitch = 0.35;
 let speedLines = null;
 let speedLineOffsets = null;
+let trailPoints = null;
+let trailPositions = null;
+let trailIndex = 0;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -344,11 +347,15 @@ let photoMode = false;
 let photoYaw = 0;
 let photoPitch = 0.2;
 let photoSpeed = 28;
+let followSpot = null;
 let weatherPressedLastFrame = false;
 let missionPressedLastFrame = false;
 let photoPressedLastFrame = false;
 let hudPressedLastFrame = false;
 let timePressedLastFrame = false;
+let demoMode = false;
+let demoPressedLastFrame = false;
+let demoTime = 0;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -600,7 +607,7 @@ function buildEnvironment() {
     // Deep night sky
     if (!USE_VIDEO_BACKGROUND) {
         scene.background = new THREE.Color(0x050810);
-    } else {
+    } else if (cameraMode === 2) {
         scene.background = null;
     }
 
@@ -631,6 +638,13 @@ function buildEnvironment() {
     const hemi = new THREE.HemisphereLight(0x223366, 0xff6600, 0.7);
     envHemi = hemi;
     scene.add(hemi);
+
+    // Follow spotlight to keep the car visually crisp
+    followSpot = new THREE.SpotLight(0x66ccff, 1.2, 90, Math.PI / 6, 0.35, 1.1);
+    followSpot.castShadow = false;
+    followSpot.position.set(0, 18, 0);
+    scene.add(followSpot);
+    scene.add(followSpot.target);
 
     // Neon street point lights — duplicated for 4 Tiles
     const lights = [
@@ -1143,6 +1157,37 @@ function updateSpeedLines(speed, boosting, dt) {
     pos.needsUpdate = true;
 }
 
+function updateTrail(dt) {
+    if (!trailPoints || !trailPositions) return;
+    const speed = Math.abs(carSpeed);
+    if (speed < 0.2) return;
+    const sy = Math.sin(carRoot.rotation.y);
+    const cy = Math.cos(carRoot.rotation.y);
+    const backX = -sy * 1.6;
+    const backZ = -cy * 1.6;
+    trailPositions[trailIndex * 3] = carRoot.position.x + backX;
+    trailPositions[trailIndex * 3 + 1] = carRoot.position.y + 0.2;
+    trailPositions[trailIndex * 3 + 2] = carRoot.position.z + backZ;
+    trailIndex = (trailIndex + 1) % (trailPositions.length / 3);
+    trailPoints.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateFollowSpot() {
+    if (!followSpot) return;
+    const sy = Math.sin(carRoot.rotation.y);
+    const cy = Math.cos(carRoot.rotation.y);
+    followSpot.position.set(
+        carRoot.position.x - sy * 2,
+        carRoot.position.y + 14,
+        carRoot.position.z - cy * 2
+    );
+    followSpot.target.position.set(
+        carRoot.position.x + sy * 2,
+        carRoot.position.y + 1.2,
+        carRoot.position.z + cy * 2
+    );
+}
+
 function initDriftSmoke() {
     const count = lowQuality ? 140 : 240;
     const geo = new THREE.BufferGeometry();
@@ -1160,6 +1205,28 @@ function initDriftSmoke() {
     scene.add(driftSmokePts);
     driftSmokeLife = new Float32Array(count);
     driftSmokeVel = Array.from({ length: count }, () => new THREE.Vector3());
+}
+
+function initTrail() {
+    const trailCount = lowQuality ? 140 : 240;
+    trailPositions = new Float32Array(trailCount * 3);
+    for (let i = 0; i < trailCount; i++) {
+        trailPositions[i * 3] = 0;
+        trailPositions[i * 3 + 1] = -9999;
+        trailPositions[i * 3 + 2] = 0;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+    const mat = new THREE.PointsMaterial({
+        color: 0x00ffcc,
+        size: lowQuality ? 0.12 : 0.18,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    trailPoints = new THREE.Points(geo, mat);
+    scene.add(trailPoints);
 }
 
 function updateDriftSmoke(dt, pos, yaw, speed, drifting) {
@@ -1386,6 +1453,23 @@ function updateCamera(dt) {
             pos.z + r * Math.cos(camYaw) * Math.cos(camPitch)
         );
         camera.lookAt(pos.x, pos.y + 1, pos.z);
+    } else {
+        // Drone — cinematic orbit + dolly
+        const t = performance.now() * 0.0002;
+        const r = 26 + Math.sin(t * 2.2) * 4;
+        const y = 10 + Math.sin(t * 1.4) * 2.5;
+        const yawAuto = t * 1.6;
+        camera.position.set(
+            pos.x + r * Math.sin(yawAuto),
+            pos.y + y,
+            pos.z + r * Math.cos(yawAuto)
+        );
+        const lookAhead = new THREE.Vector3(
+            pos.x + sy * 6,
+            pos.y + 2.2,
+            pos.z + cy * 6
+        );
+        camera.lookAt(lookAhead);
     }
 }
 
@@ -1477,6 +1561,7 @@ async function init() {
     setupWeather();
     initMissions();
     initDriftSmoke();
+    initTrail();
     initPickups();
     initSpeedCameras();
     setWeatherMode(0);
@@ -1995,6 +2080,8 @@ function animate() {
         updateParticles(dt, carRoot.position, carRoot.rotation.y, 25);
         updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, true);
         updateSpeedLines(carSpeed, false, dt);
+        updateTrail(dt);
+        updateFollowSpot();
         updateWeather(dt);
         updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
@@ -2017,7 +2104,7 @@ function animate() {
         mouseSteer *= 0.9;
     }
 
-    const steerInput = THREE.MathUtils.clamp(
+    let steerInput = THREE.MathUtils.clamp(
         (kbLeft ? 1 : 0) + (kbRight ? -1 : 0) + mouseSteer + touchState.steer + gamepadState.steer,
         -1, 1
     );
@@ -2025,12 +2112,15 @@ function animate() {
     throttleInput = Math.max(kbFwd ? 1 : 0, mouseThrottle ? 1 : 0, touchState.throttle ? 1 : 0, gamepadState.throttle);
     brakeInput = Math.max(kbBack ? 1 : 0, mouseBrake ? 1 : 0, touchState.brake ? 1 : 0, gamepadState.brake);
 
-    const boosting = (keys['shift'] || keys['shiftleft'] || touchState.boost || gamepadState.boost) && boostFuel > 0;
+    let boosting = (keys['shift'] || keys['shiftleft'] || touchState.boost || gamepadState.boost) && boostFuel > 0;
     const handbrake = keys[' '] || touchState.handbrake || gamepadState.handbrake;
 
     // Camera switch (C / Gamepad Y / Mobile Cam, one-shot)
     const cNow = keys['c'] || touchState.camSwitch || gamepadState.camSwitch;
-    if (cNow && !camSwitchedLastFrame) cameraMode = (cameraMode + 1) % 3;
+    if (cNow && !camSwitchedLastFrame) {
+        cameraMode = (cameraMode + 1) % 4;
+        if (cameraMode === 3) showEvent('CAMERA: DRONE', '#66ccff');
+    }
     camSwitchedLastFrame = cNow;
 
     // Reset (R / Gamepad X / Mobile Reset, one-shot)
@@ -2052,6 +2142,21 @@ function animate() {
     resetPressedLastFrame = rNow;
     touchState.camSwitch = false;
     touchState.reset = false;
+
+    const vNow = keys['v'];
+    if (vNow && !demoPressedLastFrame) {
+        demoMode = !demoMode;
+        showEvent(demoMode ? 'SHOWCASE MODE ON' : 'SHOWCASE MODE OFF', demoMode ? '#00ffcc' : '#ff6666');
+    }
+    demoPressedLastFrame = vNow;
+
+    if (demoMode) {
+        demoTime += dt;
+        steerInput = Math.sin(demoTime * 0.6) * 0.65;
+        throttleInput = 0.85;
+        brakeInput = 0;
+        boosting = Math.sin(demoTime * 0.45) > 0.7 && boostFuel > 0;
+    }
 
     const tNow = keys['t'] || touchState.weather;
     if (tNow && !weatherPressedLastFrame) {
@@ -2243,6 +2348,8 @@ function animate() {
     updateParticles(dt, carRoot.position, carRoot.rotation.y, carSpeed);
     updateDriftSmoke(dt, carRoot.position, carRoot.rotation.y, carSpeed, isDrifting);
     updateSpeedLines(carSpeed, boosting, dt);
+    updateTrail(dt);
+    updateFollowSpot();
     updateWeather(dt);
     updateTraffic(dt);
     updatePickups(dt);

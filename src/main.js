@@ -314,9 +314,11 @@ let trailPoints = null;
 let trailPositions = null;
 let trailIndex = 0;
 let underglow = null;
-let underglowOn = true;
+let underglowOn = false;
 let boostShockwaves = [];
 let boostingLastFrame = false;
+let boostPads = [];
+let boostPadCooldown = 0;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -361,6 +363,9 @@ let demoMode = false;
 let demoPressedLastFrame = false;
 let demoTime = 0;
 let glowPressedLastFrame = false;
+let autoTime = false;
+let autoTimePressedLastFrame = false;
+let autoTimePhase = 0;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -1203,9 +1208,8 @@ function updateUnderglow(dt, boosting) {
     const intensity = (1.2 + speed * 1.8) * pulse * boostAmp;
     underglow.material.emissiveIntensity = intensity;
     underglow.material.opacity = 0.45 + speed * 0.35;
-    const hue = (0.48 + speed * 0.12) % 1;
-    underglow.material.emissive.setHSL(hue, 0.9, 0.6);
-    underglow.material.color.setHSL(hue, 0.8, 0.5);
+    underglow.material.emissive.setHex(0xffd400);
+    underglow.material.color.setHex(0xffd400);
     underglow.scale.setScalar(1 + speed * 0.25);
     underglow.material.needsUpdate = true;
 }
@@ -1245,6 +1249,55 @@ function updateBoostShockwaves(dt) {
         ring.scale.setScalar(scale);
         ring.material.opacity = 0.85 * (1 - t);
     }
+}
+
+function updateBoostPads(dt) {
+    if (boostPads.length === 0) return;
+    boostPadCooldown = Math.max(0, boostPadCooldown - dt);
+    boostPads.forEach((pad, idx) => {
+        const pulse = 0.6 + Math.sin(performance.now() * 0.004 + idx) * 0.4;
+        pad.material.opacity = 0.55 + pulse * 0.35;
+        pad.material.emissiveIntensity = 2.8 + pulse * 2.2;
+    });
+    if (boostPadCooldown > 0) return;
+    for (let i = 0; i < boostPads.length; i++) {
+        const pad = boostPads[i];
+        const d = carRoot.position.distanceTo(pad.position);
+        if (d < 5.5) {
+            boostFuel = Math.min(100, boostFuel + 35);
+            carSpeed = Math.min(carSpeed + 18, BOOST_SPEED);
+            showEvent('BOOST PAD', '#66ccff');
+            spawnBoostShockwave();
+            boostPadCooldown = 1.2;
+            break;
+        }
+    }
+}
+
+function updateAutoTime(dt) {
+    if (!autoTime) return;
+    autoTimePhase += dt * 0.03;
+    const t = (Math.sin(autoTimePhase * Math.PI * 2) + 1) * 0.5;
+
+    const fogNight = new THREE.Color(0x060912);
+    const fogDawn = new THREE.Color(0xb4c7df);
+    if (scene.fog) scene.fog.color.copy(fogNight).lerp(fogDawn, t);
+
+    if (envAmbient) envAmbient.intensity = THREE.MathUtils.lerp(3.8, 2.2, t);
+    if (envMoon) envMoon.intensity = THREE.MathUtils.lerp(3.2, 1.2, t);
+    if (envHemi) {
+        const skyNight = new THREE.Color(0x223366);
+        const skyDawn = new THREE.Color(0xcfd9e8);
+        const groundNight = new THREE.Color(0xff6600);
+        const groundDawn = new THREE.Color(0xe6d7b8);
+        envHemi.color.copy(skyNight).lerp(skyDawn, t);
+        envHemi.groundColor.copy(groundNight).lerp(groundDawn, t);
+        envHemi.intensity = THREE.MathUtils.lerp(0.7, 0.9, t);
+    }
+
+    const neonNight = lowQuality ? 3.2 : 4.5;
+    const neonDawn = lowQuality ? 1.4 : 2.2;
+    envNeonLights.forEach(l => { l.intensity = THREE.MathUtils.lerp(neonNight, neonDawn, t); });
 }
 
 function initDriftSmoke() {
@@ -1288,12 +1341,39 @@ function initTrail() {
     scene.add(trailPoints);
 }
 
+function initBoostPads() {
+    const padGeo = new THREE.PlaneGeometry(8, 2.2);
+    const padMat = new THREE.MeshStandardMaterial({
+        color: 0x00d1ff,
+        emissive: 0x00d1ff,
+        emissiveIntensity: 4,
+        transparent: true,
+        opacity: 0.75
+    });
+    const padPositions = [
+        new THREE.Vector3(30, 0.03, 30),
+        new THREE.Vector3(-40, 0.03, 60),
+        new THREE.Vector3(-120, 0.03, -40),
+        new THREE.Vector3(90, 0.03, -120),
+        new THREE.Vector3(0, 0.03, -160)
+    ];
+    boostPads = padPositions.map((p, i) => {
+        const pad = new THREE.Mesh(padGeo, padMat.clone());
+        pad.rotation.x = -Math.PI / 2;
+        pad.position.copy(p);
+        pad.position.y = 0.03;
+        pad.material.emissiveIntensity = 3.5 + (i % 2) * 1.2;
+        scene.add(pad);
+        return pad;
+    });
+}
+
 function initUnderglow() {
     const geo = new THREE.RingGeometry(1.2, 3.6, 48);
     const mat = new THREE.MeshStandardMaterial({
-        color: 0x00ffcc,
-        emissive: 0x00ffcc,
-        emissiveIntensity: 2.2,
+        color: 0xffd400,
+        emissive: 0xffd400,
+        emissiveIntensity: 2.6,
         transparent: true,
         opacity: 0.65,
         side: THREE.DoubleSide
@@ -1637,6 +1717,7 @@ async function init() {
     initMissions();
     initDriftSmoke();
     initTrail();
+    initBoostPads();
     initPickups();
     initSpeedCameras();
     setWeatherMode(0);
@@ -1895,6 +1976,7 @@ async function init() {
     scene.add(carRoot);
     carRoot.position.set(17, 0.1, 40);
     carRoot.rotation.y = Math.PI;
+    initUnderglow();
 
     // Init camPos behind car
     const sy0 = Math.sin(carRoot.rotation.y), cy0 = Math.cos(carRoot.rotation.y);
@@ -2159,6 +2241,8 @@ function animate() {
         updateFollowSpot();
         updateUnderglow(dt, false);
         updateBoostShockwaves(dt);
+        updateBoostPads(dt);
+        updateAutoTime(dt);
         updateWeather(dt);
         updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
@@ -2279,6 +2363,13 @@ function animate() {
         setTimeOfDay(timeOfDay === 0 ? 1 : 0);
     }
     timePressedLastFrame = nNow;
+
+    const yNow = keys['y'];
+    if (yNow && !autoTimePressedLastFrame) {
+        autoTime = !autoTime;
+        showEvent(autoTime ? 'AUTO TIME ON' : 'AUTO TIME OFF', autoTime ? '#00ffcc' : '#ff6666');
+    }
+    autoTimePressedLastFrame = yNow;
 
     const hNow = keys['h'];
     if (hNow && !hudPressedLastFrame) {
@@ -2441,6 +2532,8 @@ function animate() {
     updateFollowSpot();
     updateUnderglow(dt, boosting);
     updateBoostShockwaves(dt);
+    updateBoostPads(dt);
+    updateAutoTime(dt);
     updateWeather(dt);
     updateTraffic(dt);
     updatePickups(dt);

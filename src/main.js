@@ -313,6 +313,8 @@ let speedLineOffsets = null;
 let trailPoints = null;
 let trailPositions = null;
 let trailIndex = 0;
+let underglow = null;
+let underglowOn = true;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -356,6 +358,7 @@ let timePressedLastFrame = false;
 let demoMode = false;
 let demoPressedLastFrame = false;
 let demoTime = 0;
+let glowPressedLastFrame = false;
 
 const camPos = new THREE.Vector3(0, 12, 30);
 const camLook = new THREE.Vector3();
@@ -1188,6 +1191,23 @@ function updateFollowSpot() {
     );
 }
 
+function updateUnderglow(dt, boosting) {
+    if (!underglow) return;
+    underglow.visible = underglowOn;
+    if (!underglowOn) return;
+    const speed = Math.min(Math.abs(carSpeed) / MAX_SPEED, 1);
+    const pulse = 1.4 + Math.sin(performance.now() * 0.006) * 0.6;
+    const boostAmp = boosting ? 1.8 : 1.0;
+    const intensity = (1.2 + speed * 1.8) * pulse * boostAmp;
+    underglow.material.emissiveIntensity = intensity;
+    underglow.material.opacity = 0.45 + speed * 0.35;
+    const hue = (0.48 + speed * 0.12) % 1;
+    underglow.material.emissive.setHSL(hue, 0.9, 0.6);
+    underglow.material.color.setHSL(hue, 0.8, 0.5);
+    underglow.scale.setScalar(1 + speed * 0.25);
+    underglow.material.needsUpdate = true;
+}
+
 function initDriftSmoke() {
     const count = lowQuality ? 140 : 240;
     const geo = new THREE.BufferGeometry();
@@ -1227,6 +1247,22 @@ function initTrail() {
     });
     trailPoints = new THREE.Points(geo, mat);
     scene.add(trailPoints);
+}
+
+function initUnderglow() {
+    const geo = new THREE.RingGeometry(1.2, 3.6, 48);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x00ffcc,
+        emissive: 0x00ffcc,
+        emissiveIntensity: 2.2,
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide
+    });
+    underglow = new THREE.Mesh(geo, mat);
+    underglow.rotation.x = -Math.PI / 2;
+    underglow.position.set(0, 0.06, 0);
+    carRoot.add(underglow);
 }
 
 function updateDriftSmoke(dt, pos, yaw, speed, drifting) {
@@ -1820,6 +1856,7 @@ async function init() {
     scene.add(carRoot);
     carRoot.position.set(17, 0.1, 40);
     carRoot.rotation.y = Math.PI;
+    initUnderglow();
 
     // Init camPos behind car
     const sy0 = Math.sin(carRoot.rotation.y), cy0 = Math.cos(carRoot.rotation.y);
@@ -2082,6 +2119,7 @@ function animate() {
         updateSpeedLines(carSpeed, false, dt);
         updateTrail(dt);
         updateFollowSpot();
+        updateUnderglow(dt, false);
         updateWeather(dt);
         updateTraffic(dt);
         if (frameCount % 60 === 0) updateReflections();
@@ -2149,6 +2187,13 @@ function animate() {
         showEvent(demoMode ? 'SHOWCASE MODE ON' : 'SHOWCASE MODE OFF', demoMode ? '#00ffcc' : '#ff6666');
     }
     demoPressedLastFrame = vNow;
+
+    const uNow = keys['u'];
+    if (uNow && !glowPressedLastFrame) {
+        underglowOn = !underglowOn;
+        showEvent(underglowOn ? 'NEON GLOW ON' : 'NEON GLOW OFF', underglowOn ? '#66ccff' : '#ff6666');
+    }
+    glowPressedLastFrame = uNow;
 
     if (demoMode) {
         demoTime += dt;
@@ -2350,6 +2395,7 @@ function animate() {
     updateSpeedLines(carSpeed, boosting, dt);
     updateTrail(dt);
     updateFollowSpot();
+    updateUnderglow(dt, boosting);
     updateWeather(dt);
     updateTraffic(dt);
     updatePickups(dt);

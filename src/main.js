@@ -320,6 +320,11 @@ let boostShockwaves = [];
 let boostingLastFrame = false;
 let boostPads = [];
 let boostPadCooldown = 0;
+let scanWave = null;
+let scanActive = false;
+let scanLife = 0;
+let scanCooldown = 0;
+let scanPressedLastFrame = false;
 let driftSmokePts = null;
 let driftSmokeLife = null;
 let driftSmokeVel = null;
@@ -982,6 +987,7 @@ function initPickups() {
         const pz = (Math.random() - 0.5) * 260;
         core.position.set(px, 1.2 + Math.random() * 1.5, pz);
         core.userData.collected = false;
+        core.userData.scanGlow = 0;
         scene.add(core);
         pickupMeshes.push(core);
     }
@@ -997,6 +1003,17 @@ function updatePickups(dt) {
         if (core.userData.collected) return;
         core.rotation.y += dt * 1.2;
         core.position.y += Math.sin(Date.now() * 0.002 + core.position.x) * 0.004;
+        if (core.userData.scanGlow > 0) {
+            core.userData.scanGlow = Math.max(0, core.userData.scanGlow - dt * 1.2);
+            const glow = core.userData.scanGlow;
+            if (core.material) {
+                core.material.emissiveIntensity = 2.5 + glow * 5.0;
+            }
+            core.scale.setScalar(1 + glow * 0.35);
+        } else {
+            core.scale.setScalar(1);
+            if (core.material) core.material.emissiveIntensity = 2.5;
+        }
         if (carRoot.position.distanceTo(core.position) < 3.2) {
             core.userData.collected = true;
             core.visible = false;
@@ -1370,6 +1387,54 @@ function initBoostPads() {
         scene.add(pad);
         return pad;
     });
+}
+
+function initScanWave() {
+    const geo = new THREE.RingGeometry(1, 1.6, 64);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x66ffcc,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    scanWave = new THREE.Mesh(geo, mat);
+    scanWave.rotation.x = -Math.PI / 2;
+    scanWave.visible = false;
+    scene.add(scanWave);
+}
+
+function triggerScan() {
+    if (scanCooldown > 0) return;
+    scanActive = true;
+    scanLife = 0;
+    scanCooldown = 6;
+    if (scanWave) {
+        scanWave.visible = true;
+        scanWave.position.copy(carRoot.position);
+        scanWave.position.y = 0.08;
+        scanWave.scale.setScalar(1);
+        scanWave.material.opacity = 0.7;
+    }
+    pickupMeshes.forEach(core => {
+        if (!core.userData.collected) core.userData.scanGlow = 1;
+    });
+    showEvent('SCAN PULSE', '#66ffcc');
+}
+
+function updateScanWave(dt) {
+    scanCooldown = Math.max(0, scanCooldown - dt);
+    if (!scanActive || !scanWave) return;
+    scanLife += dt;
+    const t = scanLife / 1.2;
+    if (t >= 1) {
+        scanActive = false;
+        scanWave.visible = false;
+        return;
+    }
+    const scale = 1 + t * 35;
+    scanWave.scale.setScalar(scale);
+    scanWave.material.opacity = 0.7 * (1 - t);
 }
 
 function initUnderglow() {
@@ -1761,6 +1826,7 @@ async function init() {
     initDriftSmoke();
     initTrail();
     initBoostPads();
+    initScanWave();
     initPickups();
     initSpeedCameras();
     setWeatherMode(0);
@@ -2286,6 +2352,7 @@ function animate() {
         updateUnderglow(dt, false);
         updateBoostShockwaves(dt);
         updateBoostPads(dt);
+        updateScanWave(dt);
         updateAutoTime(dt);
         updateWeather(dt);
         updateTraffic(dt);
@@ -2414,6 +2481,12 @@ function animate() {
         showEvent(autoTime ? 'AUTO TIME ON' : 'AUTO TIME OFF', autoTime ? '#00ffcc' : '#ff6666');
     }
     autoTimePressedLastFrame = yNow;
+
+    const fNow = keys['f'];
+    if (fNow && !scanPressedLastFrame) {
+        triggerScan();
+    }
+    scanPressedLastFrame = fNow;
 
     const hNow = keys['h'];
     if (hNow && !hudPressedLastFrame) {
@@ -2577,6 +2650,7 @@ function animate() {
     updateUnderglow(dt, boosting);
     updateBoostShockwaves(dt);
     updateBoostPads(dt);
+    updateScanWave(dt);
     updateAutoTime(dt);
     updateWeather(dt);
     updateTraffic(dt);

@@ -13,6 +13,7 @@ let mouseSteerSensitivity = 0.012;
 const USE_VIDEO_BACKGROUND = true;
 const CAR_BODY_COLOR = 0xffd400;
 const SHOW_NAME_IN_SPEEDOMETER = true;
+const STYLIZED_MODE = true;
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER
@@ -617,21 +618,21 @@ function buildEnvironment() {
 
     // Deep night sky
     if (!USE_VIDEO_BACKGROUND) {
-        scene.background = new THREE.Color(0x050810);
-    } else if (cameraMode === 2) {
+        scene.background = new THREE.Color(STYLIZED_MODE ? 0x04101b : 0x050810);
+    } else {
         scene.background = null;
     }
 
     // Dense night fog — clear enough to see buildings, thick enough for atmosphere
-    scene.fog = new THREE.FogExp2(0x060912, BASE_FOG_DENSITY);
+    scene.fog = new THREE.FogExp2(STYLIZED_MODE ? 0x04121a : 0x060912, BASE_FOG_DENSITY);
 
     // Strong ambient — must be high enough to show GLB textures
-    const amb = new THREE.AmbientLight(0x6688cc, 3.8);
+    const amb = new THREE.AmbientLight(STYLIZED_MODE ? 0x66b6ff : 0x6688cc, 3.8);
     envAmbient = amb;
     scene.add(amb);
 
     // Moonlight — cool directional, strong
-    const moon = new THREE.DirectionalLight(0xaabbdd, 3.2);
+    const moon = new THREE.DirectionalLight(STYLIZED_MODE ? 0xbfe9ff : 0xaabbdd, 3.2);
     moon.position.set(40, 120, -60);
     moon.castShadow = true;
     moon.shadow.mapSize.set(lowQuality ? 1024 : 2048, lowQuality ? 1024 : 2048);
@@ -646,7 +647,7 @@ function buildEnvironment() {
     scene.add(moon);
 
     // Warm city bounce — orange under-fill
-    const hemi = new THREE.HemisphereLight(0x223366, 0xff6600, 0.7);
+    const hemi = new THREE.HemisphereLight(STYLIZED_MODE ? 0x1c3a5c : 0x223366, STYLIZED_MODE ? 0x0ff2c9 : 0xff6600, 0.7);
     envHemi = hemi;
     scene.add(hemi);
 
@@ -681,6 +682,8 @@ function buildEnvironment() {
             envNeonLights.push(pl);
         });
     });
+
+    if (STYLIZED_MODE) addNeonPylons();
 
     // ── GROUND SYSTEM — Will be filled by loadRoads() GLB tiling
     const geoSize = 720;
@@ -851,7 +854,7 @@ function setWeatherMode(mode) {
 function setTimeOfDay(mode) {
     timeOfDay = mode;
     if (timeOfDay === 0) {
-        if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(0x050810);
+        if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(STYLIZED_MODE ? 0x04101b : 0x050810);
         if (scene.fog) scene.fog.color = new THREE.Color(0x060912);
         if (envAmbient) envAmbient.intensity = 3.8;
         if (envMoon) envMoon.intensity = 3.2;
@@ -861,7 +864,7 @@ function setTimeOfDay(mode) {
             envHemi.intensity = 0.7;
         }
         envNeonLights.forEach(l => { l.intensity = lowQuality ? 3.2 : 4.5; });
-    } else if (cameraMode === 2) {
+    } else {
         if (!USE_VIDEO_BACKGROUND) scene.background = new THREE.Color(0x9bb7d6);
         if (scene.fog) scene.fog.color = new THREE.Color(0xb4c7df);
         if (envAmbient) envAmbient.intensity = 2.2;
@@ -1596,7 +1599,7 @@ function updateCamera(dt) {
         camera.position.set(pos.x + sy * 0.2, pos.y + 1.8, pos.z + cy * 0.2);
         camera.lookAt(pos.x + sy * 20, pos.y + 1.6, pos.z + cy * 20);
 
-    } else if (cameraMode === 2) {
+    } else {
         // Orbit — right-click drag
         if (mouseDX !== 0 || mouseDY !== 0) {
             camYaw += mouseDX * 0.004;
@@ -1707,6 +1710,45 @@ function applyCarPaint(material) {
     material.color.setHex(CAR_BODY_COLOR);
 }
 
+function applyStylizedMaterial(material) {
+    if (!material || !material.color) return;
+    if (material.transparent && material.opacity < 0.8) return;
+    const base = new THREE.Color(0x7cc8ff);
+    material.color.lerp(base, 0.35);
+    material.roughness = Math.min(0.9, Math.max(0.45, material.roughness || 0.6));
+    material.metalness = Math.min(0.35, material.metalness || 0.15);
+    if (material.emissiveIntensity > 0 || material.emissive) {
+        material.emissive = material.emissive || new THREE.Color(0x00ffd5);
+        material.emissive.setHex(0x00ffd5);
+        material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 1.8);
+    }
+    material.needsUpdate = true;
+}
+
+function addNeonPylons() {
+    const geo = new THREE.CylinderGeometry(0.25, 0.25, 12, 16);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x0ff2c9,
+        emissive: 0x0ff2c9,
+        emissiveIntensity: 4,
+        transparent: true,
+        opacity: 0.75
+    });
+    const positions = [
+        new THREE.Vector3(20, 6, 50),
+        new THREE.Vector3(-30, 6, 70),
+        new THREE.Vector3(60, 6, -40),
+        new THREE.Vector3(-90, 6, -20),
+        new THREE.Vector3(110, 6, 10)
+    ];
+    positions.forEach((p, i) => {
+        const m = new THREE.Mesh(geo, mat.clone());
+        m.position.copy(p);
+        m.material.emissiveIntensity = 3.5 + (i % 2) * 1.4;
+        scene.add(m);
+    });
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 //  INIT
@@ -1755,6 +1797,7 @@ async function init() {
             const mats = Array.isArray(c.material) ? c.material : [c.material];
             mats.forEach(m => {
                 if (m.emissiveIntensity > 0) m.emissiveIntensity *= 1.5;
+                if (STYLIZED_MODE) applyStylizedMaterial(m);
             });
         });
 
@@ -2752,5 +2795,6 @@ window.addEventListener('resize', () => {
 
 initResumeMarkers();
 init();
+
 
 

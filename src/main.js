@@ -1507,6 +1507,8 @@ const speedCanvas = document.getElementById('speed-canvas');
 const compassCanvas = document.getElementById('compass-canvas');
 const speedCtx = speedCanvas.getContext('2d');
 const compassCtx = compassCanvas.getContext('2d');
+const waypointEl = document.getElementById('waypoint');
+const waypointLabelEl = document.getElementById('waypoint-label');
 const gearEl = document.getElementById('gear-value');
 const coordsEl = document.getElementById('coords');
 const statusMiniEl = document.getElementById('status-mini');
@@ -1590,10 +1592,29 @@ function drawCompass(yaw) {
     compassCtx.fillStyle = '#fff'; compassCtx.fill();
 }
 
+function updateWaypointArrow() {
+    if (!waypointEl || resumeMarkers.length === 0) return;
+    let nearest = null;
+    let bestD = Infinity;
+    resumeMarkers.forEach(m => {
+        const d = carRoot.position.distanceTo(m.marker.position);
+        if (d < bestD) { bestD = d; nearest = m; }
+    });
+    if (!nearest) return;
+    const toTarget = new THREE.Vector3().subVectors(nearest.marker.position, carRoot.position);
+    const yaw = carRoot.rotation.y;
+    const angle = Math.atan2(toTarget.x, toTarget.z) - yaw;
+    waypointEl.style.transform = `rotate(${angle}rad)`;
+    if (waypointLabelEl) {
+        waypointLabelEl.textContent = `Nearest: ${nearest.data.title}`;
+    }
+}
+
 function updateHUD(speed, yaw, pos) {
     const kmh = Math.abs(speed) * 3.6;
     drawSpeedometer(kmh);
     drawCompass(yaw);
+    updateWaypointArrow();
 
     if (SHOW_NAME_IN_SPEEDOMETER) {
         document.getElementById('speed-value').textContent = 'JIBIN';

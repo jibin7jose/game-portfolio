@@ -73,6 +73,38 @@
       z-index: 10;
     }
 
+    /* Billboard */
+    .billboard {
+      position: absolute;
+      left: 50%;
+      bottom: 2.2rem;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(0, 255, 204, 0.25);
+      border-radius: 18px;
+      padding: 0.6rem 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .billboard-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: #00ffcc;
+      font-weight: 700;
+    }
+
+    .billboard-sub {
+      font-size: 0.55rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.55);
+    }
+
     /* Speedometer */
     #speedometer {
       position: absolute;
@@ -408,6 +440,43 @@
       right: 2rem;
       width: 70px;
       height: 70px;
+    }
+
+    /* Waypoint arrow */
+    #waypoint {
+      position: absolute;
+      top: 8.5rem;
+      right: 2.1rem;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(0, 255, 204, 0.25);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    #waypoint::after {
+      content: "";
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-bottom: 16px solid #00ffcc;
+      transform: translateY(-2px);
+      filter: drop-shadow(0 0 6px rgba(0, 255, 204, 0.6));
+    }
+
+    #waypoint-label {
+      position: absolute;
+      top: 12.4rem;
+      right: 1.8rem;
+      font-size: 0.45rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.5);
+      text-align: right;
     }
 
     #compass-canvas {
@@ -1021,6 +1090,8 @@
       <div id="compass">
         <canvas id="compass-canvas" width="70" height="70"></canvas>
       </div>
+      <div id="waypoint" title="Nearest Profile Node"></div>
+      <div id="waypoint-label">Nearest Node</div>
 
       <!-- Controls panel -->
       <div id="controls-panel">

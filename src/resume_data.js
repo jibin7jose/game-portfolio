@@ -2,6 +2,7 @@ export const resumeData = [
     {
         id: "experience",
         title: "EXPERIENCE",
+        highlight: "Full‑stack roles building web, mobile, and 3D‑ready experiences.",
         position: { x: -180, z: -180 },
         content: `
             <h3>Full Stack Development Intern</h3>
@@ -31,6 +32,7 @@ export const resumeData = [
     {
         id: "skills",
         title: "SKILLS & FOCUS",
+        highlight: "React + Three.js + backend systems for realtime apps.",
         position: { x: 180, z: -180 },
         content: `
             <p><strong>Core:</strong> JavaScript, TypeScript, React, Next.js, React Native</p>
@@ -43,6 +45,7 @@ export const resumeData = [
     {
         id: "portfolio",
         title: "PORTFOLIO & LINKS",
+        highlight: "Live portfolio, GitHub, and LinkedIn.",
         position: { x: -180, z: 180 },
         content: `
             <p>Explore my work and interactive 3D experiments:</p>
@@ -54,6 +57,7 @@ export const resumeData = [
     {
         id: "personal",
         title: "ABOUT JIBIN",
+        highlight: "Frontend + 3D web engineer based in Kerala, India.",
         position: { x: 180, z: 180 },
         content: `
             <p><strong>Name:</strong> JIBIN JOSE</p>
@@ -66,6 +70,7 @@ export const resumeData = [
     {
         id: "projects",
         title: "SELECTED PROJECTS",
+        highlight: "Games, enterprise tools, and ecommerce builds.",
         position: { x: -80, z: 80 },
         content: `
             <h3>OUTBREAK FPS GAME</h3>
@@ -84,6 +89,7 @@ export const resumeData = [
     {
         id: "education",
         title: "EDUCATION",
+        highlight: "B.Tech CSE with strong CS fundamentals.",
         position: { x: 80, z: 80 },
         content: `
             <h3>Bachelor of Technology in CSE</h3>
@@ -96,6 +102,7 @@ export const resumeData = [
     {
         id: "certifications",
         title: "CERTIFICATIONS",
+        highlight: "MERN and Python credentials.",
         position: { x: -80, z: -80 },
         content: `
             <p><strong>The MERN Fullstack Guide</strong> – Udemy (Jun 2024)</p>
@@ -105,6 +112,7 @@ export const resumeData = [
     {
         id: "community",
         title: "COMMUNITY",
+        highlight: "Volunteer leadership and event coordination.",
         position: { x: 80, z: -80 },
         content: `
             <p><strong>NSS Volunteer:</strong> Coordinated community service events focused on health and education.</p>

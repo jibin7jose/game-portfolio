@@ -2767,6 +2767,9 @@ function updateResumeLogic(dt) {
     const containerEl = document.getElementById('resume-container');
     const titleEl = document.getElementById('resume-title');
     const contentEl = document.getElementById('resume-content');
+    const spotEl = document.getElementById('resume-spotlight');
+    const spotTitleEl = spotEl ? spotEl.querySelector('.spot-title') : null;
+    const spotLineEl = spotEl ? spotEl.querySelector('.spot-line') : null;
 
     if (!promptEl || !containerEl) return;
 
@@ -2780,6 +2783,11 @@ function updateResumeLogic(dt) {
                 containerEl.classList.add('active');
                 promptEl.classList.remove('active');
             }
+            if (spotEl) {
+                spotEl.classList.add('active');
+                if (spotTitleEl) spotTitleEl.textContent = `PROFILE: ${closestSection.data.title}`;
+                if (spotLineEl) spotLineEl.textContent = closestSection.data.highlight || 'Scan complete';
+            }
         } else {
             // Near but not scanning
             promptEl.classList.add('active');
@@ -2788,6 +2796,11 @@ function updateResumeLogic(dt) {
                 containerEl.classList.remove('active');
                 currentActiveResume = null;
             }
+            if (spotEl) {
+                spotEl.classList.add('active');
+                if (spotTitleEl) spotTitleEl.textContent = `PROFILE: ${closestSection.data.title}`;
+                if (spotLineEl) spotLineEl.textContent = closestSection.data.highlight || 'Move closer to scan';
+            }
         }
     } else {
         // Out of range
@@ -2795,6 +2808,9 @@ function updateResumeLogic(dt) {
         if (currentActiveResume) {
             containerEl.classList.remove('active');
             currentActiveResume = null;
+        }
+        if (spotEl) {
+            spotEl.classList.remove('active');
         }
     }
 }

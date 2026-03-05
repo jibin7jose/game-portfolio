@@ -794,6 +794,44 @@
       animation: pulsatePrompt 2s infinite ease-in-out;
     }
 
+    #resume-spotlight {
+      position: absolute;
+      top: 8.5rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: rgba(6, 12, 22, 0.65);
+      border: 1px solid rgba(0, 255, 204, 0.3);
+      border-radius: 16px;
+      padding: 0.9rem 1.4rem;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      pointer-events: none;
+      text-align: center;
+      min-width: 260px;
+    }
+
+    #resume-spotlight.active {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #resume-spotlight .spot-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: #00ffcc;
+      margin-bottom: 0.4rem;
+    }
+
+    #resume-spotlight .spot-line {
+      font-size: 0.65rem;
+      color: rgba(255, 255, 255, 0.75);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
     @keyframes pulsatePrompt {
       0% {
         box-shadow: 0 0 10px rgba(0, 255, 204, 0.25);
@@ -935,6 +973,10 @@
     <!-- Resume UI Elements -->
     <div id="resume-overlay">
       <div id="resume-prompt">APPROACH TO UNLOCK PROFILE NODES</div>
+      <div id="resume-spotlight">
+        <div class="spot-title">PROFILE SPOTLIGHT</div>
+        <div class="spot-line">Move closer to scan</div>
+      </div>
       <div id="resume-container">
         <div id="resume-header">
           <div id="resume-title">SECTION TITLE</div>
